@@ -1,0 +1,4 @@
+# Replace desk.example.com with your domain (its DNS A record must point at this server).
+desk.example.com {
+	reverse_proxy 127.0.0.1:3000
+}

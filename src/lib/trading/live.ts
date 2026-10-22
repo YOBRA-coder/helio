@@ -171,6 +171,18 @@ export function safeError(e: unknown): string {
   return msg.replace(/0x[a-fA-F0-9]{40,}/g, "0x…").replace(/(secret|passphrase|key)["':= ]+[A-Za-z0-9+/=_-]{8,}/gi, "$1=…").slice(0, 240);
 }
 
+export async function checkGeoblock(): Promise<{ blocked: boolean | null; where: string }> {
+  try {
+    const res = await fetch("https://polymarket.com/api/geoblock", { headers: { accept: "application/json" }, signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return { blocked: null, where: "" };
+    const j = (await res.json()) as { blocked?: unknown; country?: unknown; region?: unknown };
+    if (typeof j.blocked !== "boolean") return { blocked: null, where: "" };
+    return { blocked: j.blocked, where: [j.country, j.region].filter((x) => typeof x === "string" && x).join("/") || "this location" };
+  } catch {
+    return { blocked: null, where: "" };
+  }
+}
+
 export async function submitLive(
   sdk: ClobSdk,
   book: LiveBook,
@@ -178,6 +190,7 @@ export async function submitLive(
   market: Market,
   plan: LivePlan,
   now: number,
+  geo: typeof checkGeoblock = checkGeoblock,
 ): Promise<LiveOrder> {
   const dry = book.status === "dry";
   const base: LiveOrder = {
@@ -198,6 +211,12 @@ export async function submitLive(
     signalId: sig.id,
   };
   try {
+    // Polymarket blocks trading from some countries and regions. Placing orders from one can breach its terms,
+    // so live orders fail closed: refuse unless Polymarket's own check says this machine is allowed.
+    const g = dry ? { blocked: false, where: "" } : await geo();
+    if (g.blocked !== false) {
+      return { ...base, status: "rejected", note: g.blocked === true ? `Polymarket blocks trading from ${g.where}. Not sent.` : "Could not confirm this location is allowed to trade. Not sent." };
+    }
     const tickSize = String(await sdk.client.getTickSize(plan.tokenId));
     const negRisk = await sdk.client.getNegRisk(plan.tokenId);
     const order = { tokenID: plan.tokenId, price: plan.price, size: plan.size, side: sdk.BUY };

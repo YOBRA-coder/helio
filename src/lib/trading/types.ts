@@ -69,6 +69,8 @@ export interface Signal {
   /** Base-model YES probability and the context-adjusted YES probability, for A/B scoring. */
   pYesBase: number;
   pYesCtx: number;
+  /** Shadow variant (momentum). Scored against outcomes but never traded. */
+  pYesAlt?: number;
   marketMid: number;
   status: "pending" | "approved" | "rejected" | "expired" | "executed" | "blocked";
   rejectedReason: string | null;
@@ -126,6 +128,7 @@ export interface Position {
   /** Snapshot at entry, used for calibration scoring when the position settles. */
   pYesBase: number;
   pYesCtx: number;
+  pYesAlt?: number;
   entryMid: number;
   entryAt: number;
   endAt: number;
@@ -192,6 +195,7 @@ export interface Opportunity {
   probability: number;
   yesProbability: number;
   pYesBase: number;
+  pYesAlt: number;
   marketMid: number;
   uncertainty: number;
   side: Side;
@@ -224,6 +228,7 @@ export interface ScoreRow {
   /** YES-side probabilities at entry. */
   pYesBase: number;
   pYesCtx: number;
+  pYesAlt?: number;
   marketMid: number;
   yesWon: boolean | null;
   edgeAtEntry: number;

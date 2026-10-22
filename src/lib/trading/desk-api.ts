@@ -17,6 +17,7 @@ export interface DeskView {
     checks: GateCheck[];
     eligible: boolean;
     power: string;
+    calibration: string;
     recent: DeskCore["scores"];
   } | null;
   liveEnv: { enabled: boolean; hasKey: boolean; hasFunder: boolean; hasOwnerToken: boolean };
@@ -32,7 +33,7 @@ const COMMAND_TYPES = new Set([
 export const getDesk = createServerFn({ method: "GET" }).handler(async (): Promise<DeskView> => {
   const { readSnapshot, HEARTBEAT_STALE_MS } = await import("./desk-io.ts");
   const sess = await import("../accounts/session.server.ts");
-  const { summarize, evaluateGate, powerNote, DEFAULT_GATE } = await import("./trial.ts");
+  const { summarize, evaluateGate, powerNote, calibrationNote, DEFAULT_GATE } = await import("./trial.ts");
   const { STARTING_CASH } = await import("./engine.ts");
   const { liveEnv } = await import("./live.ts");
   const now = Date.now();
@@ -69,7 +70,7 @@ export const getDesk = createServerFn({ method: "GET" }).handler(async (): Promi
     feedError: snap.feedError,
     lastCommandNote: snap.lastCommandNote,
     core: trimmed,
-    trial: { summary, checks: gate.checks, eligible: gate.eligible, power: powerNote(summary), recent: snap.core.scores.slice(0, 40) },
+    trial: { summary, checks: gate.checks, eligible: gate.eligible, power: powerNote(summary), calibration: calibrationNote(summary), recent: snap.core.scores.slice(0, 40) },
     liveEnv: snap.liveEnv,
     signedIn: true,
     now,
@@ -111,5 +112,47 @@ export const startBacktest = createServerFn({ method: "POST" })
     const days = Math.min(30, Math.max(1, Math.round(Number(data.days) || 7)));
     const max = Math.min(1500, Math.max(50, Math.round(Number(data.max) || 400)));
     void runJob({ days, maxPerSeries: max, useCache: false }).catch(() => {});
+    return { ok: true };
+  });
+
+const MAX_BACKUP_BYTES = 25 * 1024 * 1024;
+
+/** Everything that makes up the desk (book, scores, trial clock, limits). Keys and passwords are never included. */
+export const exportBackup = createServerFn({ method: "POST" }).handler(
+  async (): Promise<{ ok: boolean; error?: string; filename?: string; json?: string }> => {
+    const { readSnapshot } = await import("./desk-io.ts");
+    const sess = await import("../accounts/session.server.ts");
+    sess.assertSameSite();
+    const user = await sess.currentUser();
+    if (!user) return { ok: false, error: "Sign in first." };
+    const snap = await readSnapshot(sess.accounts().userDir(user.id));
+    if (!snap) return { ok: false, error: "No desk data yet. Start the worker first." };
+    const body = { kind: "helios-backup", version: 1, exportedAt: new Date().toISOString(), core: snap.core };
+    return { ok: true, filename: `helios-backup-${new Date().toISOString().slice(0, 10)}.json`, json: JSON.stringify(body) };
+  },
+);
+
+export const restoreBackup = createServerFn({ method: "POST" })
+  .validator((i: { json: string }) => i)
+  .handler(async ({ data }): Promise<{ ok: boolean; error?: string }> => {
+    const { writeRestore, readSnapshot, backupSnapshot } = await import("./desk-io.ts");
+    const sess = await import("../accounts/session.server.ts");
+    sess.assertSameSite();
+    const user = await sess.currentUser();
+    if (!user) return { ok: false, error: "Sign in first." };
+    if (typeof data.json !== "string" || data.json.length > MAX_BACKUP_BYTES) return { ok: false, error: "That file is too large to be a Helios backup." };
+    let parsed: { kind?: unknown; version?: unknown; core?: Record<string, unknown> };
+    try {
+      parsed = JSON.parse(data.json);
+    } catch {
+      return { ok: false, error: "That is not valid JSON." };
+    }
+    const c = parsed.core;
+    if (parsed.kind !== "helios-backup" || !c || typeof c !== "object" || !Array.isArray(c.positions) || !Array.isArray(c.scores) || typeof c.cash !== "number") {
+      return { ok: false, error: "That file is not a Helios backup." };
+    }
+    const dir = sess.accounts().userDir(user.id);
+    if (await readSnapshot(dir)) await backupSnapshot(dir); // keep the current desk as desk.bak.json before replacing it
+    await writeRestore(dir, JSON.stringify({ core: c }));
     return { ok: true };
   });

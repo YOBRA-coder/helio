@@ -31,6 +31,11 @@ function DeskHome() {
   const flatten = useDesk((s) => s.flatten);
   const scores = useDesk((s) => s.trial?.summary);
 
+  const dayStartMs = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+  const todayRows = (useDesk((s) => s.trial?.recent) ?? []).filter((r) => r.kind === "live" && r.settledAt >= dayStartMs);
+  const todayWins = todayRows.filter((r) => r.pnl > 0).length;
+  const todayPnl = todayRows.reduce((a, r) => a + r.pnl, 0);
+  const openList = positions.filter((p) => p.status === "open").sort((a, b) => a.endAt - b.endAt);
   const reserved = orders.filter((o) => o.status === "open").reduce((sum, o) => sum + o.debit, 0);
   const marks = positions.filter((p) => p.status === "open").reduce((sum, p) => sum + p.quantity * p.lastMark, 0);
   const equity = cash + reserved + marks;
@@ -65,7 +70,7 @@ function DeskHome() {
               : latestBlock
                 ? `Nothing is waiting. Latest gate: ${latestBlock.rejectedReason}`
                 : "Nothing is waiting. A quiet log means the filter refused the book, not that the feed died.",
-        `${liveMarkets.length} live Bitcoin windows from Polymarket. ${onBook} are priced off the public order book. ${simMarkets.length} simulated windows stay underneath for expiry practice. ${openPositions} paper position${openPositions === 1 ? "" : "s"} marked.`,
+        `${liveMarkets.length} live Bitcoin windows from Polymarket. ${onBook} are priced off the public order book. ${simMarkets.length ? `${simMarkets.length} practice windows run underneath. ` : ""}${openPositions} paper position${openPositions === 1 ? "" : "s"} marked.`,
       ].join(" ");
 
   return (
@@ -95,6 +100,30 @@ function DeskHome() {
         />
         <Stat label="Open exposure" value={booted ? money(exposure, 0) : "—"} hint="Cost of positions and resting orders" />
       </div>
+
+      <Panel title="Today">
+        <div className="grid gap-4 md:grid-cols-3">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-muted">Settled today (real windows)</p>
+            <p className="mt-1 font-mono text-xl tabular-nums">
+              {todayRows.length} · {todayWins}W {todayRows.length - todayWins}L
+            </p>
+            <p className={`font-mono text-sm tabular-nums ${todayPnl >= 0 ? "text-primary" : "text-danger"}`}>{signedMoney(todayPnl)}</p>
+          </div>
+          <div className="md:col-span-2">
+            <p className="text-xs uppercase tracking-wide text-muted">Open positions</p>
+            <ul className="mt-1 space-y-1 text-sm">
+              {openList.slice(0, 4).map((p) => (
+                <li key={p.id} className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 flex-1 truncate">{p.group} · {p.side.toUpperCase()} · {p.question}</span>
+                  <Countdown end={p.endAt} />
+                </li>
+              ))}
+              {openList.length === 0 && <li className="text-muted">None. Waiting for a signal that clears every gate.</li>}
+            </ul>
+          </div>
+        </div>
+      </Panel>
 
       <div className="grid gap-4 lg:grid-cols-5">
         <Panel title="BTC reference and window opens" className="lg:col-span-3">
@@ -205,6 +234,7 @@ function DeskHome() {
         </p>
       </Panel>
 
+      {simMarkets.length > 0 && (
       <Panel
         title="Paper windows"
         action={<Pill tone={liveStatus === "ok" ? "good" : "neutral"}>{liveStatus === "ok" ? "Reference up" : "Feed warming"}</Pill>}
@@ -235,6 +265,7 @@ function DeskHome() {
         </div>
         <p className="mt-3 text-sm text-muted">Simulated, so expiry can be rehearsed without a five-minute id pinned in the code.</p>
       </Panel>
+      )}
     </div>
   );
 }

@@ -32,7 +32,7 @@ function MarketsPage() {
       <div className="max-w-3xl">
         <h1 className="text-3xl font-semibold tracking-tight">Discover the board. Don't pin one window.</h1>
         <p className="mt-2 text-muted">
-          Live rows are discovered from Polymarket, then their bids and asks stream from the public order book. Short windows stay simulated so you can rehearse expiry without a hardcoded five-minute id.
+          Live rows are discovered from Polymarket, then their bids and asks stream from the public order book. Windows are found automatically, so no five-minute id is hardcoded.
         </p>
       </div>
       {liveError && <p className="rounded-lg bg-danger-soft px-4 py-3 text-sm text-danger">{liveError}</p>}

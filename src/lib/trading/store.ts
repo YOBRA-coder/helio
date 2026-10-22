@@ -3,7 +3,7 @@ import { isTheme, MODEL_VERSION, runBacktest, STARTING_CASH } from "./engine.ts"
 import { applyCommand, applyQuotes, applyTape, hydrateCore, makeCore, tickCore } from "./ledger.ts";
 import { getDesk, sendCommand, type DeskView } from "./desk-api.ts";
 import { fetchResolutionsFn, fetchTape } from "./tape.ts";
-import { DEFAULT_GATE, evaluateGate, powerNote, summarize } from "./trial.ts";
+import { DEFAULT_GATE, calibrationNote, evaluateGate, powerNote, summarize } from "./trial.ts";
 import type { LiveQuote } from "./book-socket.ts";
 import type { BacktestReport, DeskCommand, DeskCore, Mode, RiskConfig, ThemeId } from "./types.ts";
 
@@ -86,7 +86,7 @@ function writeLocal(core: DeskCore) {
 function localTrial(core: DeskCore, now: number): DeskState["trial"] {
   const summary = summarize(core, now, STARTING_CASH);
   const gate = evaluateGate(summary, core.risk.drawdownLimit, DEFAULT_GATE);
-  return { summary, checks: gate.checks, eligible: gate.eligible, power: powerNote(summary), recent: core.scores.slice(0, 40) };
+  return { summary, checks: gate.checks, eligible: gate.eligible, power: powerNote(summary), calibration: calibrationNote(summary), recent: core.scores.slice(0, 40) };
 }
 
 const noEnv = { enabled: false, hasKey: false, hasFunder: false, hasOwnerToken: false };

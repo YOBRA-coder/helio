@@ -6,6 +6,8 @@ import {
   FlaskConical,
   Gauge,
   LayoutDashboard,
+  Menu,
+  X,
   Radar,
   ScrollText,
   SlidersHorizontal,
@@ -13,11 +15,14 @@ import {
   Wallet,
   Zap,
 } from "lucide-react";
-import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { MODEL_VERSION, THEMES } from "@/lib/trading/engine";
 import { remain } from "@/lib/trading/format";
 import { useDesk } from "@/lib/trading/store";
+
+/** The four tabs that stay on the phone bar; everything else lives behind "More". */
+const PRIMARY = ["/", "/signals", "/book", "/trial"];
 
 const NAV = [
   { to: "/", label: "Desk", icon: LayoutDashboard },
@@ -46,12 +51,14 @@ export function Shell({ children }: { children: ReactNode }) {
   const alerts = useDesk((s) => s.alerts);
   const markAlertsRead = useDesk((s) => s.markAlertsRead);
   const [open, setOpen] = useState(false);
+  const [more, setMore] = useState(false);
+  useEffect(() => setMore(false), [pathname]);
   const unread = alerts.filter((a) => !a.read).length;
   const page = NAV.find((item) => item.to === pathname)?.label ?? "Desk";
 
   return (
-    <div className="min-h-screen text-fg">
-      <header className="chrome sticky top-0 z-30 border-b border-line">
+    <div className="min-h-dvh text-fg">
+      <header className="chrome-solid sticky top-0 z-30 border-b border-line">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <Link to="/" className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-lg bg-primary text-primary-fg">
@@ -156,7 +163,7 @@ export function Shell({ children }: { children: ReactNode }) {
             })}
           </ul>
         </nav>
-        <main className="min-w-0 pb-24 md:pb-10">
+        <main className="min-w-0 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-10">
           <div className="glow pointer-events-none -mx-4 -mt-5 mb-4 h-16" />
           <div className="mb-4 flex flex-col gap-3">
             <p className="text-xs font-medium uppercase tracking-wide text-muted">{page}</p>
@@ -196,26 +203,79 @@ export function Shell({ children }: { children: ReactNode }) {
         </main>
       </div>
 
-      <nav className="chrome fixed inset-x-0 bottom-0 z-30 border-t border-line md:hidden">
-        <ul className="flex overflow-x-auto">
-          {NAV.map((item) => {
+      {more && (
+        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label="More pages">
+          <button type="button" aria-label="Close menu" className="absolute inset-0 bg-black/60" onClick={() => setMore(false)} />
+          <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-line bg-surface px-4 pt-4 shadow-2xl" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1rem)" }}>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-semibold">More</p>
+              <button type="button" aria-label="Close" onClick={() => setMore(false)} className="grid size-11 place-items-center rounded-full border border-line">
+                <X className="size-4" />
+              </button>
+            </div>
+            <ul className="grid grid-cols-3 gap-2">
+              {NAV.filter((item) => !PRIMARY.includes(item.to)).map((item) => {
+                const Icon = item.icon;
+                const active = pathname === item.to;
+                return (
+                  <li key={item.to}>
+                    <Link
+                      to={item.to}
+                      className={cn(
+                        "flex h-20 flex-col items-center justify-center gap-2 rounded-xl border text-sm",
+                        active ? "border-primary bg-primary-soft text-primary" : "border-line bg-raised",
+                      )}
+                    >
+                      <Icon className="size-5" />
+                      {item.label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      <nav className="chrome-solid fixed inset-x-0 bottom-0 z-30 border-t border-line md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }} aria-label="Primary">
+        <ul className="flex">
+          {NAV.filter((item) => PRIMARY.includes(item.to)).map((item) => {
             const active = pathname === item.to;
             const Icon = item.icon;
             return (
-              <li key={item.to} className="min-w-[4.25rem] flex-1">
+              <li key={item.to} className="flex-1">
                 <Link
                   to={item.to}
+                  aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex h-14 flex-col items-center justify-center gap-1 px-0.5 text-xs",
-                    active ? "bg-primary-soft text-primary" : "text-muted",
+                    "flex h-16 flex-col items-center justify-center gap-1 text-xs",
+                    active ? "text-primary" : "text-muted",
                   )}
                 >
-                  <Icon className="size-4" />
-                  <span className="w-full truncate text-center">{item.label}</span>
+                  <span className={cn("grid h-7 w-12 place-items-center rounded-full", active && "bg-primary-soft")}>
+                    <Icon className="size-5" />
+                  </span>
+                  {item.label}
                 </Link>
               </li>
             );
           })}
+          <li className="flex-1">
+            <button
+              type="button"
+              onClick={() => setMore(true)}
+              aria-haspopup="dialog"
+              className={cn(
+                "flex h-16 w-full flex-col items-center justify-center gap-1 text-xs",
+                !PRIMARY.includes(pathname) ? "text-primary" : "text-muted",
+              )}
+            >
+              <span className={cn("grid h-7 w-12 place-items-center rounded-full", !PRIMARY.includes(pathname) && "bg-primary-soft")}>
+                <Menu className="size-5" />
+              </span>
+              {!PRIMARY.includes(pathname) ? (NAV.find((i) => i.to === pathname)?.label ?? "More") : "More"}
+            </button>
+          </li>
         </ul>
       </nav>
     </div>

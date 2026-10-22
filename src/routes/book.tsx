@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { ModelVsMarketChart } from "@/components/charts";
 import { Button, Panel, Pill } from "@/components/widgets";
-import { clock, money, px, signedMoney } from "@/lib/trading/format";
+import { clock, downloadText, money, pct, px, signedMoney, toCsv } from "@/lib/trading/format";
 import { useDesk } from "@/lib/trading/store";
 
 export const Route = createFileRoute("/book")({
@@ -17,6 +18,7 @@ function BookPage() {
   const fills = useDesk((s) => s.fills);
   const positions = useDesk((s) => s.positions);
   const flatten = useDesk((s) => s.flatten);
+  const hist = useDesk((s) => s.hist);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Positions");
   const reserved = orders.filter((o) => o.status === "open").reduce((sum, o) => sum + o.debit, 0);
   const unrealized = positions
@@ -45,7 +47,7 @@ function BookPage() {
           <p className="text-sm text-muted">Realized {signedMoney(realized)}</p>
         </Panel>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {TABS.map((item) => (
           <button
             key={item}
@@ -60,6 +62,22 @@ function BookPage() {
             {item}
           </button>
         ))}
+        <Button
+          type="button"
+          variant="quiet"
+          className="ml-auto"
+          onClick={() =>
+            downloadText(
+              `helios-trades-${new Date().toISOString().slice(0, 10)}.csv`,
+              toCsv([
+                ["entered", "settled", "status", "kind", "window", "question", "side", "shares", "avg cost", "fees", "pnl", "model p(up)", "market mid", "edge", "result"],
+                ...positions.map((p) => [new Date(p.entryAt).toISOString(), p.settledAt ? new Date(p.settledAt).toISOString() : "", p.status, p.kind, p.group, p.question, p.side, p.quantity.toFixed(2), p.averageCost.toFixed(4), p.fees.toFixed(2), p.realized.toFixed(2), p.pYesBase.toFixed(4), p.entryMid.toFixed(4), p.edgeAtEntry.toFixed(4), p.yesWon == null ? "" : p.yesWon ? "up" : "down"]),
+              ]),
+            )
+          }
+        >
+          Export trades CSV
+        </Button>
       </div>
       {tab === "Positions" && (
         <div className="space-y-3">
@@ -79,6 +97,25 @@ function BookPage() {
                   {position.status === "open" ? signedMoney(unrealized) : signedMoney(position.realized)}
                 </p>
                 {position.settleNote && <p className="mt-2 text-sm text-muted">{position.settleNote}</p>}
+                <details className="mt-3 rounded-md border border-line bg-raised p-3">
+                  <summary className="cursor-pointer text-sm font-semibold">Trade detail</summary>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 font-mono text-xs tabular-nums sm:grid-cols-3">
+                    <Row k="Entered" v={clock(position.entryAt)} />
+                    <Row k="Window" v={position.group} />
+                    <Row k="Model P(Up) at entry" v={pct(position.pYesBase)} />
+                    {position.pYesAlt != null && <Row k="Shadow momentum P(Up)" v={pct(position.pYesAlt)} />}
+                    <Row k="Market mid at entry" v={pct(position.entryMid)} />
+                    <Row k="Net edge at entry" v={position.edgeAtEntry.toFixed(3)} />
+                    <Row k="Fees" v={money(position.fees)} />
+                    <Row k="Model" v={position.modelVersion} />
+                    <Row k="Result" v={position.yesWon == null ? "open / not official" : position.yesWon ? "Up won" : "Down won"} />
+                  </dl>
+                  {(hist[position.marketId]?.length ?? 0) > 2 && (
+                    <div className="mt-3">
+                      <ModelVsMarketChart rows={hist[position.marketId]} />
+                    </div>
+                  )}
+                </details>
                 {position.status === "open" && (
                   <Button type="button" variant="quiet" className="mt-3" onClick={() => flatten(position.id)}>
                     Flatten at touch
@@ -121,6 +158,15 @@ function BookPage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div>
+      <dt className="font-sans text-muted">{k}</dt>
+      <dd>{v}</dd>
     </div>
   );
 }

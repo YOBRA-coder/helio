@@ -5,6 +5,8 @@ import {
   deleteAccount, getMe, getSettings, saveSettings, signOutFn, testConnection,
   type Me, type SettingsInput, type SettingsView,
 } from "@/lib/trading/auth-api";
+import { exportBackup, restoreBackup } from "@/lib/trading/desk-api";
+import { downloadText } from "@/lib/trading/format";
 import { useDesk } from "@/lib/trading/store";
 
 export const Route = createFileRoute("/account")({
@@ -138,11 +140,35 @@ function AccountPage() {
       </Panel>
 
       <Panel title="Alerts webhook (optional)" action={<Pill tone={view?.hasWebhook ? "good" : "neutral"}>{view?.hasWebhook ? "Set" : "Not set"}</Pill>}>
-        <p className="mb-3 text-sm text-muted">Discord or Slack incoming-webhook URL. You get a message when a live order is posted or rejected, a breaker trips, or live is disarmed.</p>
+        <p className="mb-3 text-sm text-muted">A phone alert URL. Works with ntfy (https://ntfy.sh/your-secret-topic, then install the ntfy app), Telegram (https://api.telegram.org/bot{"<token>"}/sendMessage?chat_id={"<id>"}), Discord or Slack webhooks. You get a message for settled trades, a daily summary, live orders, breaker trips and disarms.</p>
         <input value={f.hook} onChange={(e) => setF({ ...f, hook: e.target.value })} placeholder={view?.hasWebhook ? "saved (paste to replace)" : "https://…"} className={input} />
         <div className="mt-3 flex gap-2">
           <Button type="button" disabled={busy || !f.hook} onClick={() => void save({ webhookUrl: f.hook }, "Webhook saved.")}>Save</Button>
           <Button type="button" variant="quiet" disabled={busy || !view?.hasWebhook} onClick={() => void save({ clear: ["webhookUrl"] }, "Webhook removed.")}>Remove</Button>
+        </div>
+      </Panel>
+
+      <Panel title="Backup and restore">
+        <p className="mb-3 text-sm text-muted">
+          Download your whole paper desk (book, trial record, limits). Saved keys and your password are never included. Restoring replaces the
+          current desk, keeps the old one as a one-step backup on the server, and always comes back with live trading off.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" disabled={busy} onClick={async () => {
+            const r = await exportBackup().catch(() => ({ ok: false, error: "Server did not answer." } as { ok: boolean; error?: string; filename?: string; json?: string }));
+            if (r.ok && r.json && r.filename) { downloadText(r.filename, r.json); setMsg("Backup downloaded."); } else setMsg(r.error ?? "Could not export.");
+          }}>Download backup</Button>
+          <label className="inline-flex h-11 cursor-pointer items-center rounded-md border border-line bg-surface px-4 text-sm font-medium">
+            Restore from file
+            <input type="file" accept="application/json,.json" className="sr-only" onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              if (!window.confirm("Replace the current desk with this backup? Live trading will be switched off.")) return;
+              const r = await restoreBackup({ data: { json: await file.text() } }).catch(() => ({ ok: false, error: "Server did not answer." }));
+              setMsg(r.ok ? "Backup sent. The worker applies it within a few seconds." : (r.error ?? "Could not restore."));
+            }} />
+          </label>
         </div>
       </Panel>
 

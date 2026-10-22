@@ -55,6 +55,7 @@ function TrialPage() {
         </Panel>
         <Panel title="Calibration: model vs what happened">
           <CalibrationChart rows={sum?.calibration ?? []} />
+          <p className="mt-2 text-sm">{trial?.calibration}</p>
           <p className="mt-2 text-xs text-muted">Dots on the dashed line mean the model’s 70% really wins 70% of the time. Dots far from it mean overconfidence.</p>
         </Panel>
       </div>
@@ -83,7 +84,7 @@ function TrialPage() {
 
       {sum && sum.brierModel != null && (
         <Panel title="Calibration (Brier score, lower is better)">
-          <div className="grid gap-3 font-mono text-sm tabular-nums sm:grid-cols-3">
+          <div className="grid gap-3 font-mono text-sm tabular-nums sm:grid-cols-4">
             <div>
               <p className="text-xs text-muted">Model</p>
               <p>{sum.brierModel.toFixed(4)}</p>
@@ -91,6 +92,10 @@ function TrialPage() {
             <div>
               <p className="text-xs text-muted">Model + context</p>
               <p>{sum.brierCtx?.toFixed(4) ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted">Shadow: momentum</p>
+              <p>{sum.brierAlt?.toFixed(4) ?? "needs 10+"}</p>
             </div>
             <div>
               <p className="text-xs text-muted">Market price</p>

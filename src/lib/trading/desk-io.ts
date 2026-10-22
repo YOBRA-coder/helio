@@ -91,3 +91,20 @@ export async function drainCommands(dir: string): Promise<DeskCommand[]> {
   }
   return out;
 }
+
+export async function writeRestore(dir: string, text: string) {
+  await mkdir(dir, { recursive: true });
+  await writeAtomic(join(dir, "restore.json"), text);
+}
+
+/** Returns the pending restore payload (and removes the file), or null. */
+export async function takeRestore(dir: string): Promise<unknown | null> {
+  const path = join(dir, "restore.json");
+  try {
+    const raw = await readFile(path, "utf8");
+    await unlink(path).catch(() => {});
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}

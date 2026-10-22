@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { realizedVol } from "./engine.ts";
+import { realizedVol, momentumProbability } from "./engine.ts";
 import { applyCommand, applyTape, makeCore, tickCore } from "./ledger.ts";
 import { planLiveOrder, reconcileLive, submitLive, roundUpToTick, type ClobSdk } from "./live.ts";
 import { DeskRunner } from "./runner.ts";
-import { evaluateGate, summarize } from "./trial.ts";
+import { calibrationNote, evaluateGate, summarize } from "./trial.ts";
 import { parseCrowd, parseWmMarkets, pickIndex } from "./context.ts";
 import { parseResolution, type TapePayload } from "./tape-fetch.ts";
 import type { Market, ScoreRow } from "./types.ts";
@@ -152,7 +152,7 @@ test("dry run signs but never posts; armed posts; reconcile settles on resolutio
   const dry = await submitLive(sdk, { ...makeCore(T0).live, status: "dry" }, sig(), market, plan, T0);
   assert.equal(dry.status, "dry");
   assert.deepEqual(log, ["create"]);
-  const real = await submitLive(sdk, { ...makeCore(T0).live, status: "armed" }, sig(), market, plan, T0);
+  const real = await submitLive(sdk, { ...makeCore(T0).live, status: "armed" }, sig(), market, plan, T0, async () => ({ blocked: false, where: "" }));
   assert.equal(real.status, "open");
   assert.ok(log.includes("post"));
   const book = { ...makeCore(T0).live, status: "armed" as const, orders: [real] };
@@ -347,4 +347,73 @@ test("fetchDataset assembles markets, prices and candles from fake endpoints", a
   assert.equal(ds.markets.length, 1);
   assert.equal(ds.markets[0].yesWon, false);
   assert.ok(ds.candles.length >= 1);
+});
+
+test("Up/Down window with no open price is a coin flip, never a confident number", () => {
+  const s = applyTape(makeCore(T0), tape(T0), {}, T0 + 400_000);
+  const m = { ...s.liveMarkets[0], openSpot: null };
+  assert.equal(yesProbability(m, 100_000, T0).p, 0.5);
+});
+
+test("real windows can trade with an empty rules text; windows that have not started are skipped", () => {
+  const t = tape(T0);
+  t.markets[0].description = "";
+  t.markets[0].restricted = false;
+  let s = applyTape(makeCore(T0), t, { "poly-m1": 100_000 }, T0);
+  assert.equal(s.liveMarkets[0].metadataOk, true);
+  const future = tape(T0);
+  future.markets[0].startAt = T0 + 3_600_000;
+  future.markets[0].endAt = T0 + 3_900_000;
+  s = applyTape(makeCore(T0), future, {}, T0);
+  s = { ...s, mode: "auto" };
+  for (let i = 1; i <= 40; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_000, spotFresh: true, spotDtMs: 1000, sim: false });
+  assert.equal(s.signals.length, 0);
+});
+
+test("sim:false produces no practice windows", () => {
+  let s = makeCore(T0);
+  s = tickCore(s, { now: T0 + 1000, spot: 100_000, spotFresh: true, spotDtMs: 1000, sim: false });
+  assert.equal(s.simMarkets.length, 0);
+});
+
+test("momentum shadow variant nudges at most a few points and stays in bounds", () => {
+  const spots = Array.from({ length: 30 }, (_, i) => 100_000 + i * 10);
+  const p = momentumProbability(0.5, spots, 100_300, null, 6000);
+  assert.ok(p > 0.5 && p <= 0.54);
+  assert.equal(momentumProbability(0.5, [], 100_000, null, 6000), 0.5);
+});
+
+test("calibration note needs enough data and flags overconfidence", () => {
+  const rows: ScoreRow[] = [];
+  for (let i = 0; i < 40; i += 1) {
+    rows.push({
+      id: `c${i}`, marketId: "m", question: "q", kind: "live", group: "5m", side: "yes", entryAt: T0, settledAt: T0 + i,
+      minutesToExpiry: 5, entryPrice: 0.5, quantity: 10, fees: 0, pnl: i % 2 ? 5 : -5,
+      pYesBase: 0.9, pYesCtx: 0.9, marketMid: 0.5, yesWon: i % 2 === 0, edgeAtEntry: 0.2, official: true, venue: "paper",
+    } as unknown as ScoreRow);
+  }
+  const sum = summarize({ scores: rows, trialStartedAt: T0 }, T0 + 86_400_000, 10_000);
+  assert.match(calibrationNote(sum), /overstated/);
+  const few = summarize({ scores: rows.slice(0, 5), trialStartedAt: T0 }, T0 + 1000, 10_000);
+  assert.match(calibrationNote(few), /Not enough/);
+});
+
+test("expired unfilled orders do not use up the hourly order cap", () => {
+  let s = applyTape(makeCore(T0), tape(T0, 0.2), { "poly-m1": 100_000 }, T0);
+  s = { ...s, mode: "auto", risk: { ...s.risk, maxOrdersPerHour: 1 } };
+  s = { ...s, orders: [{ id: "o", marketId: "x", status: "cancelled", submittedAt: T0 } as never, ...s.orders] };
+  for (let i = 1; i <= 24; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_000, spotFresh: true, spotDtMs: 1000, sim: false });
+  assert.ok(!s.signals.some((x) => /hour is at the cap/.test(x.rejectedReason ?? "")));
+});
+
+test("live orders fail closed when the location is blocked or unknown", async () => {
+  const sdk = { BUY: "BUY", GTC: "GTC", client: { getTickSize: async () => "0.01", getNegRisk: async () => false, createOrder: async () => ({}), createAndPostOrder: async () => ({ success: true, orderID: "x" }) } } as unknown as ClobSdk;
+  const market = { id: "poly-1", question: "q" } as unknown as Market;
+  const plan = { tokenId: "1", price: 0.5, size: 5, cost: 2.5 } as never;
+  const sig = { id: "s", side: "yes" } as never;
+  const live = { ...makeCore(T0).live, status: "armed" as const };
+  const blocked = await submitLive(sdk, live, sig, market, plan, T0, async () => ({ blocked: true, where: "XX" }));
+  assert.equal(blocked.status, "rejected");
+  const unknown = await submitLive(sdk, live, sig, market, plan, T0, async () => ({ blocked: null, where: "" }));
+  assert.equal(unknown.status, "rejected");
 });

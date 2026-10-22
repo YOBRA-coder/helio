@@ -32,6 +32,7 @@ export interface TrialSummary {
   maxDrawdown: number;
   brierModel: number | null;
   brierCtx: number | null;
+  brierAlt: number | null;
   brierMarket: number | null;
   /** Positive when the model's probabilities beat the market mid on the same trades. */
   brierEdge: number | null;
@@ -122,6 +123,8 @@ export function summarize(core: Pick<DeskCore, "scores" | "trialStartedAt">, now
     official.length ? official.reduce((a, r) => a + (pick(r) - (r.yesWon ? 1 : 0)) ** 2, 0) / official.length : null;
   const brierModel = brier((r) => r.pYesBase);
   const brierCtx = brier((r) => r.pYesCtx);
+  const altRows = official.filter((r) => typeof r.pYesAlt === "number");
+  const brierAlt = altRows.length >= 10 ? altRows.reduce((a, r) => a + ((r.pYesAlt as number) - (r.yesWon ? 1 : 0)) ** 2, 0) / altRows.length : null;
   const brierMarket = brier((r) => r.marketMid);
 
   return {
@@ -141,6 +144,7 @@ export function summarize(core: Pick<DeskCore, "scores" | "trialStartedAt">, now
     maxDrawdown: maxDd,
     brierModel,
     brierCtx,
+    brierAlt,
     brierMarket,
     brierEdge: brierModel != null && brierMarket != null ? brierMarket - brierModel : null,
     byGroup: bucketOf(real, (r) => r.group),
@@ -199,6 +203,26 @@ export function evaluateGate(
     },
   ];
   return { checks, eligible: checks.every((c) => c.pass) };
+}
+
+/** Plain-language read on whether the model's probabilities can be trusted. */
+export function calibrationNote(summary: TrialSummary): string {
+  const rows = summary.calibration.filter((r) => r.n > 0);
+  const n = rows.reduce((a, r) => a + r.n, 0);
+  if (n < 30) return "Not enough settled windows to judge calibration yet (needs about 30).";
+  const predicted = rows.reduce((a, r) => a + r.p * r.n, 0) / n;
+  const actual = rows.reduce((a, r) => a + r.won * r.n, 0) / n;
+  const confident = rows.filter((r) => r.p >= 0.7 || r.p <= 0.3);
+  const cn = confident.reduce((a, r) => a + r.n, 0);
+  let out = `Across ${n} settled windows the model averaged ${(predicted * 100).toFixed(0)}% for Up and Up actually won ${(actual * 100).toFixed(0)}%.`;
+  if (cn >= 10) {
+    const gap = confident.reduce((a, r) => a + Math.abs((r.p >= 0.5 ? r.p : 1 - r.p) - (r.p >= 0.5 ? r.won : 1 - r.won)) * r.n, 0) / cn;
+    out += ` When it was confident (70%+), it was off by ${(gap * 100).toFixed(0)} points on average${gap > 0.1 ? ", so its big edges are probably overstated" : ""}.`;
+  }
+  if (summary.brierAlt != null && summary.brierModel != null) {
+    out += summary.brierAlt < summary.brierModel - 0.002 ? " The momentum variant scored better than the baseline." : " The momentum variant did not beat the baseline.";
+  }
+  return out;
 }
 
 /**

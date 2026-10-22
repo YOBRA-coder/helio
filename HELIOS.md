@@ -58,3 +58,10 @@ Included unchanged next to this folder. It is the execution toolbox (maker-rebat
 - The owner-token instructions earlier in this file are obsolete; accounts replaced them.
 - Not tested against real services from the build sandbox (no network): Polymarket, Coinbase, World Monitor and the live CLOB path.
   Run the backtest and a paper trial on your own machine first.
+
+## Newer additions
+- Signals page: "why blocked" summary, search and window filters. Book page: trade detail and CSV export. Desk page: Today panel.
+- Trial page: calibration note and a shadow momentum model scored beside the baseline (never traded).
+- Account page: backup/restore and phone alerts (ntfy, Telegram, Discord, Slack).
+- `npm run doctor` checks which data sources this machine can reach. VPS: see DEPLOY.md.
+- Practice windows are off by default. `HELIOS_SIM_WINDOWS=1` turns them on.

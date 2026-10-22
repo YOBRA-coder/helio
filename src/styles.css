@@ -129,11 +129,29 @@
   }
   body {
     min-height: 100vh;
+    min-height: 100dvh;
     background-color: var(--t-bg);
     color: var(--t-fg);
     background-image: var(--t-atmosphere);
     background-size: var(--t-atmosphere-size);
-    background-attachment: fixed;
+    /* background-attachment: fixed makes Android Chrome repaint the whole page on every scroll frame */
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+    scroll-padding-bottom: 6rem;
+  }
+  body {
+    overflow-x: clip;
+  }
+  .overflow-x-auto {
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .overflow-x-auto::-webkit-scrollbar {
+    display: none;
   }
   h1,
   h2,
@@ -160,6 +178,11 @@
 .chrome {
   background: color-mix(in oklab, var(--t-bg) 88%, transparent);
   backdrop-filter: blur(16px);
+}
+
+/* opaque bars: backdrop blur is expensive on Android and causes scroll stutter */
+.chrome-solid {
+  background: color-mix(in oklab, var(--t-bg) 97%, var(--t-surface));
 }
 
 .scrim {

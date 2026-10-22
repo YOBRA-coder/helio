@@ -146,7 +146,9 @@ function pushMarket(
     startAt: Number.isFinite(startAt) ? startAt : fetchedAt,
     description: typeof market.description === "string" ? market.description.slice(0, 700) : "",
     group,
-    restricted: market.restricted === true,
+    // Polymarket's per-market `restricted` flag is not an eligibility check, so it must not gate paper trading.
+    // Eligibility is checked against Polymarket's geoblock endpoint before any live order is sent.
+    restricted: false,
     yesTokenId: tokens[0] ?? null,
     noTokenId: tokens[1] ?? null,
     conditionId: typeof market.conditionId === "string" ? market.conditionId : null,

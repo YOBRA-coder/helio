@@ -1,0 +1,32 @@
+# Usage: copy .env.example to .env, fill HELIOS_MASTER_KEY, then:  docker compose up -d --build
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HELIOS_DATA_DIR: /data
+    volumes:
+      - helios-data:/data
+    ports:
+      - "127.0.0.1:3000:3000"   # only the reverse proxy (Caddy) talks to it
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["node", "--experimental-strip-types", "--no-warnings", "worker/desk-worker.ts"]
+    env_file: .env
+    environment:
+      HELIOS_DATA_DIR: /data
+    volumes:
+      - helios-data:/data
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [web]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    network_mode: host   # lets Caddy reach web on 127.0.0.1:3000
+volumes:
+  helios-data:
+  caddy-data:

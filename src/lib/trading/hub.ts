@@ -4,7 +4,7 @@
  */
 import { join } from "node:path";
 import { AccountStore, type UserSecrets } from "../accounts/store.ts";
-import { appendJournal, backupSnapshot, drainCommands, readSnapshot, writeSnapshot } from "./desk-io.ts";
+import { appendJournal, backupSnapshot, drainCommands, readSnapshot, takeRestore, writeSnapshot } from "./desk-io.ts";
 import { loadContext } from "./context.ts";
 import { loadSdk } from "./live.ts";
 import { DeskRunner, WORKER_VERSION } from "./runner.ts";
@@ -30,6 +30,11 @@ export async function sendWebhook(url: string | undefined, text: string, last: {
   if (!url || !/^https:\/\//.test(url) || now - last.at < 10_000) return;
   last.at = now;
   try {
+    if (/^https:\/\/([a-z0-9-]+\.)*ntfy\.sh\//i.test(url)) {
+      // ntfy takes the message as a plain-text body and pushes it to the phone app
+      await fetch(url, { method: "POST", headers: { title: "Helios" }, body: text.slice(0, 1800), signal: AbortSignal.timeout(5000) });
+      return;
+    }
     await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -138,6 +143,7 @@ export class Hub {
         },
         journal: (rows) => appendJournal(dir, rows),
         drainCommands: () => drainCommands(dir),
+        takeRestore: () => takeRestore(dir),
         notify: (text) => void sendWebhook(t().webhookUrl, text, webhookGate, this.now()),
       },
       prior?.core,

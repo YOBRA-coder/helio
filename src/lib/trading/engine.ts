@@ -11,6 +11,19 @@ import type {
   ThemeId,
 } from "./types.ts";
 
+/**
+ * Shadow variant: the baseline plus a small nudge from the last ~60 seconds of price movement.
+ * It is recorded and scored next to the baseline in the trial, but it never decides a trade.
+ */
+export function momentumProbability(baseP: number, spots: number[], spot: number, annualVol: number | null, spotDtMs: number) {
+  const lookback = Math.max(2, Math.round(60_000 / Math.max(1000, spotDtMs)));
+  if (spots.length <= lookback || spot <= 0) return baseP;
+  const move = spot - spots[spots.length - 1 - lookback];
+  const sigma = ((annualVol ?? PRIOR_ANNUAL_VOL) / Math.sqrt(365.25 * 24)) * Math.sqrt(1 / 60) * spot;
+  if (!(sigma > 0)) return baseP;
+  return clamp(baseP + clamp(move / sigma, -2, 2) * 0.02, 0.04, 0.96);
+}
+
 export const MODEL_VERSION = "helios-btc-0.4";
 export const STARTING_CASH = 10_000;
 export const APPROVAL_MS = 35_000;
@@ -256,7 +269,7 @@ export function evaluateOpportunity(
   ordersLastHour: number,
   killed: boolean,
   circuit: string | null,
-  extra: { vol?: number | null; context?: ContextSnapshot | null } = {},
+  extra: { vol?: number | null; context?: ContextSnapshot | null; spots?: number[]; spotDtMs?: number } = {},
 ): Opportunity {
   const blocks: string[] = [];
   if (killed) blocks.push("Kill switch is on");
@@ -326,6 +339,7 @@ export function evaluateOpportunity(
     probability: modelForSide,
     yesProbability: p,
     pYesBase: base.p,
+    pYesAlt: momentumProbability(base.p, extra.spots ?? [], spot, extra.vol ?? null, extra.spotDtMs ?? 6000),
     marketMid: (market.yesBid + market.yesAsk) / 2,
     uncertainty,
     side,

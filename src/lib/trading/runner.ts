@@ -39,6 +39,7 @@ export interface RunnerDeps {
   persist: (core: DeskCore, meta: RunnerMeta) => Promise<void>;
   journal: (rows: unknown[]) => Promise<void>;
   drainCommands: () => Promise<DeskCommand[]>;
+  takeRestore?: () => Promise<unknown | null>;
   notify?: (text: string) => void;
 }
 
@@ -67,6 +68,9 @@ export class DeskRunner {
   private journaled = new Set<string>();
   private busy = new Set<string>();
   private lastAlertAt = 0;
+  private lastDigestAt = 0;
+  private settledNotified = new Set<string>();
+  private digestPrimed = false;
 
   private deps: RunnerDeps;
 
@@ -114,6 +118,33 @@ export class DeskRunner {
     if (fresh.length) {
       this.lastAlertAt = Math.max(...fresh.map((a) => a.at));
       this.deps.notify(`Helios: ${fresh.map((a) => `${a.title} (${a.detail})`).join("; ")}`);
+    }
+  }
+
+  /** Phone alerts for settled real-market trades, plus a daily summary and a model-vs-market warning. */
+  private notifyTrades(now: number) {
+    if (!this.deps.notify) return;
+    const real = this.core.scores.filter((r) => r.kind === "live");
+    if (!this.digestPrimed) {
+      // after a restart, do not re-announce history
+      for (const r of real) this.settledNotified.add(r.id);
+      this.lastDigestAt = now;
+      this.digestPrimed = true;
+      return;
+    }
+    const fresh = real.filter((r) => !this.settledNotified.has(r.id));
+    for (const r of fresh.slice(0, 3)) {
+      this.settledNotified.add(r.id);
+      this.deps.notify(`Helios settled: ${r.side.toUpperCase()} on ${r.group} window ${r.pnl >= 0 ? "won" : "lost"} ${r.pnl >= 0 ? "+" : "-"}$${Math.abs(r.pnl).toFixed(2)} (paper).`);
+    }
+    for (const r of fresh.slice(3)) this.settledNotified.add(r.id);
+    if (now - this.lastDigestAt >= 86_400_000) {
+      this.lastDigestAt = now;
+      const s = summarize(this.core, now, STARTING_CASH);
+      const gate = evaluateGate(s, this.core.risk.drawdownLimit, DEFAULT_GATE);
+      let msg = `Helios daily summary: ${s.trades} real trades, net ${s.netPnl >= 0 ? "+" : "-"}$${Math.abs(s.netPnl).toFixed(2)}, win rate ${(s.winRate * 100).toFixed(0)}%, trial day ${s.days.toFixed(1)}, gate ${gate.eligible ? "PASSED" : "not passed"}.`;
+      if (s.officialTrades >= 30 && s.brierEdge != null && s.brierEdge <= 0) msg += " Warning: the model is not beating the market price on probability accuracy.";
+      this.deps.notify(msg);
     }
   }
 
@@ -236,6 +267,22 @@ export class DeskRunner {
       });
     }
 
+    // restore from an uploaded backup
+    const restored = d.takeRestore ? await d.takeRestore() : null;
+    if (restored && typeof restored === "object") {
+      const body = restored as { core?: unknown };
+      if (body.core && typeof body.core === "object") {
+        const next = hydrateCore(body.core, now);
+        // a restored desk never comes back armed
+        next.live = { ...next.live, status: "off", armedAt: null, auto: false };
+        next.audit = withAudit(next.audit, { id: uid("audit"), at: now, actor: "owner", action: "Backup restored", detail: "Desk state replaced from an uploaded backup. Live trading is off; re-arm it deliberately." });
+        this.core = next;
+        this.journaled = new Set(next.scores.map((x) => x.id));
+        this.settledNotified = new Set(next.scores.map((x) => x.id));
+        this.meta.lastCommandNote = "Backup restored";
+      }
+    }
+
     // commands
     const cmds = await d.drainCommands();
     for (const cmd of cmds) await this.apply(cmd);
@@ -256,6 +303,7 @@ export class DeskRunner {
     // live mirror
     await this.mirrorLive(now);
     this.notifyNew();
+    this.notifyTrades(now);
 
     // journal new scores
     const fresh2 = this.core.scores.filter((s) => !this.journaled.has(s.id));

@@ -327,6 +327,7 @@ function scoreOf(p: Position, pnl: number, now: number, yesWon: boolean | null, 
     pnl,
     pYesBase: p.pYesBase,
     pYesCtx: p.pYesCtx,
+    pYesAlt: p.pYesAlt,
     marketMid: p.entryMid,
     yesWon,
     edgeAtEntry: p.edgeAtEntry,
@@ -491,6 +492,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
           yesWon: null,
           pYesBase: signal?.pYesBase ?? yesMid,
           pYesCtx: signal?.pYesCtx ?? yesMid,
+          pYesAlt: signal?.pYesAlt,
           entryMid: yesMid,
           entryAt: now,
           endAt: market.endAt,
@@ -592,7 +594,8 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
       ...simMarkets,
       ...liveMarkets.filter((m) => m.status === "open" && !(/up or down/i.test(m.question) && m.startAt > now)),
     ];
-    const ordersLastHour = orders.filter((o) => now - o.submittedAt < 3_600_000).length;
+    // Orders that expired or were cancelled without a fill never held risk, so they do not use up the hourly cap.
+    const ordersLastHour = orders.filter((o) => now - o.submittedAt < 3_600_000 && (o.status === "open" || o.status === "filled")).length;
     const vol = realizedVol(spots, spotDtMs);
     let created = 0;
     for (const market of book) {
@@ -605,7 +608,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
       if (pending || recent || resting || held) continue;
       const opp = evaluateOpportunity(
         market, spot, now, risk, cash, exposureOf(positions, orders), ordersLastHour, s.killed, circuit,
-        { vol, context },
+        { vol, context, spots, spotDtMs },
       );
       const lastSame = signals.find((sig) => sig.marketId === market.id);
       const draft = (status: Signal["status"], expiresAt: number, mode: Mode, reason: string | null): Signal => ({
@@ -627,6 +630,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
         risks: opp.risks,
         pYesBase: opp.pYesBase,
         pYesCtx: opp.yesProbability,
+        pYesAlt: opp.pYesAlt,
         marketMid: opp.marketMid,
         status,
         rejectedReason: reason,

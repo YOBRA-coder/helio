@@ -33,4 +33,8 @@ await step("Window-open price (5 minutes ago, Coinbase → Kraken → Binance)",
   if (v == null) throw new Error(lastOpenError || "no source returned a price");
   return `BTC ${v} at ${new Date(ts).toISOString()}`;
 });
+await step("Polymarket geoblock (may you trade live from here?)", async () => {
+  const r = (await getJson("https://polymarket.com/api/geoblock")) as { blocked?: boolean; country?: string };
+  return r.blocked ? `BLOCKED (${r.country}): paper trading works, live orders are refused` : `allowed (${r.country ?? "?"})`;
+});
 console.log("\nIf a line says FAIL, that source is blocked from this machine (firewall, VPN, DNS, or region). Fix that first.");
