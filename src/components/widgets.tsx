@@ -19,6 +19,7 @@ import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "
 import { cn } from "@/lib/cn";
 import { MODEL_VERSION, THEMES } from "@/lib/trading/engine";
 import { remain } from "@/lib/trading/format";
+import { useInstall } from "@/components/pwa";
 import { useDesk } from "@/lib/trading/store";
 
 /** The four tabs that stay on the phone bar; everything else lives behind "More". */
@@ -52,7 +53,11 @@ export function Shell({ children }: { children: ReactNode }) {
   const markAlertsRead = useDesk((s) => s.markAlertsRead);
   const [open, setOpen] = useState(false);
   const [more, setMore] = useState(false);
-  useEffect(() => setMore(false), [pathname]);
+  const pwa = useInstall();
+  useEffect(() => {
+    setMore(false);
+    setOpen(false);
+  }, [pathname]);
   const unread = alerts.filter((a) => !a.read).length;
   const page = NAV.find((item) => item.to === pathname)?.label ?? "Desk";
 
@@ -123,18 +128,34 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
         {open && (
-          <div className="mx-auto max-w-6xl px-4 pb-4">
-            <div className="rounded-lg border border-line bg-surface p-3">
-              <p className="px-2 pb-2 text-xs uppercase tracking-wide text-muted">Alerts</p>
-              {alerts.length === 0 && <p className="px-2 text-sm text-muted">No alerts yet.</p>}
-              <ul className="max-h-64 space-y-2 overflow-auto">
-                {alerts.slice(0, 8).map((alert) => (
-                  <li key={alert.id} className="rounded-md bg-raised px-3 py-2">
-                    <p className="text-sm font-medium">{alert.title}</p>
-                    <p className="text-sm text-muted">{alert.detail}</p>
+          <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Alerts">
+            <button type="button" aria-label="Close alerts" className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
+            <div className="absolute inset-x-3 top-[4.5rem] max-h-[75dvh] overflow-y-auto rounded-2xl border border-line bg-surface p-3 shadow-2xl md:left-auto md:right-6 md:w-[26rem]">
+              <div className="flex items-center justify-between px-2 pb-2">
+                <p className="text-xs uppercase tracking-wide text-muted">Alerts</p>
+                <button type="button" aria-label="Close" onClick={() => setOpen(false)} className="grid size-9 place-items-center rounded-full border border-line">
+                  <X className="size-4" />
+                </button>
+              </div>
+              {alerts.length === 0 && (
+                <p className="px-2 pb-2 text-sm text-muted">No alerts. Breakers, feed problems and live-order events show up here. Everything the desk did is in the audit trail.</p>
+              )}
+              <ul className="space-y-2">
+                {alerts.slice(0, 12).map((alert) => (
+                  <li key={alert.id}>
+                    <Link to="/audit" onClick={() => setOpen(false)} className="block rounded-md bg-raised px-3 py-2">
+                      <p className="flex items-center justify-between gap-2 text-sm font-medium">
+                        <span>{alert.title}</span>
+                        <span className="font-mono text-xs font-normal text-muted">{new Date(alert.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                      </p>
+                      <p className="text-sm text-muted">{alert.detail}</p>
+                    </Link>
                   </li>
                 ))}
               </ul>
+              <Link to="/audit" onClick={() => setOpen(false)} className="mt-3 flex h-11 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-fg">
+                Open audit trail
+              </Link>
             </div>
           </div>
         )}
@@ -233,6 +254,11 @@ export function Shell({ children }: { children: ReactNode }) {
                 );
               })}
             </ul>
+            {pwa.canPrompt && !pwa.standalone && (
+              <button type="button" onClick={() => { void pwa.install(); setMore(false); }} className="mt-3 h-12 w-full rounded-xl bg-primary text-sm font-semibold text-primary-fg">
+                Install Helios on this phone
+              </button>
+            )}
           </div>
         </div>
       )}

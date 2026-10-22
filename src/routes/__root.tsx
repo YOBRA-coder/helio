@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
+import { PwaRegister } from "@/components/pwa";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { DeskProvider } from "@/components/desk-provider";
 import { Shell } from "@/components/widgets";
@@ -29,7 +30,7 @@ export const Route = createRootRoute({
       },
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },
-      { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
+      { rel: "apple-touch-icon", href: "/icons/apple-touch-180.png" },
     ],
   }),
   component: () => (
@@ -39,6 +40,7 @@ export const Route = createRootRoute({
       </head>
       <body>
         <PreviewHostBridge />
+        <PwaRegister />
         <AuthProvider>
           <DeskProvider>
             <Shell>

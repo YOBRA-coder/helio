@@ -9,5 +9,6 @@ RUN npm run build
 ENV HELIOS_DATA_DIR=/data PORT=3000 HOST=0.0.0.0
 VOLUME /data
 EXPOSE 3000
-# default = web server; the worker service overrides this command
-CMD ["node", ".output/server/index.mjs"]
+# default = web + worker in ONE container (what Render/Railway/Fly need).
+# docker-compose.yml overrides this to run them as separate services.
+CMD ["node", "scripts/start-all.mjs"]

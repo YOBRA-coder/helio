@@ -91,3 +91,12 @@ sudo ufw allow OpenSSH && sudo ufw allow 80 && sudo ufw allow 443 && sudo ufw en
 ## Health checks
 - Worker alive: the top bar of the app shows the worker status; it turns stale if the heartbeat is older than 20 seconds.
 - Phone alerts: set an ntfy URL on the Account page. You get a message when trades settle and a daily summary. A silent day can mean the worker died, so also check the app.
+
+## Render, Railway, Fly (one container)
+These hosts run one process per service, so the Docker image's default command (`scripts/start-all.mjs`) starts the web app **and** the worker together.
+1. New Web Service from this repo, runtime **Docker**.
+2. Environment: `HELIOS_MASTER_KEY` (required), `HELIOS_COOKIE_SECURE=1`, `HELIOS_DATA_DIR=/data`, `HELIOS_ALLOW_SIGNUP=1` until you have an account, then `0`.
+3. **Add a persistent disk mounted at `/data`.** Without it, every deploy or restart wipes users, keys and the trial record.
+4. **Use an always-on paid instance.** Free instances go to sleep after about 15 minutes without visitors, which also stops the worker, so a "week-long" paper trial would not run.
+5. Do not run a separate "background worker" service: services cannot share a disk, so the worker would never see your desk. The single container is correct.
+6. Open `https://<your-service>.onrender.com`, sign up, then check the Desk page: the "worker has not started" banner should clear within about 10 seconds.

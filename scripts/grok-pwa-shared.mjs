@@ -158,23 +158,27 @@ export function renderInstallPageHtml(template, { host, url } = {}) {
 }
 
 export function renderWebManifest(hostHeader) {
-  const name = appNameFromHost(hostHeader);
+  const fromHost = appNameFromHost(hostHeader);
+  // Self-hosted (Render, a VPS, localhost) gets the real app name; only *.grok.me keeps the per-app slug name.
+  const onGrok = String(hostHeader ?? "").split(",")[0].trim().split(":")[0].toLowerCase().endsWith(".grok.me");
+  const name = onGrok ? fromHost : "Helios Desk";
   return JSON.stringify(
     {
       name,
-      short_name: name,
+      short_name: onGrok ? name : "Helios",
+      description: "Paper-first Polymarket BTC trading desk",
       id: "/",
-      start_url: "/",
+      start_url: "/?source=pwa",
       scope: "/",
       display: "standalone",
-      background_color: "#000000",
-      theme_color: "#000000",
+      orientation: "portrait",
+      background_color: "#101512",
+      theme_color: "#101512",
       icons: [
-        {
-          src: "/__grok/icon-180.png",
-          sizes: "180x180",
-          type: "image/png",
-        },
+        { src: "/__grok/icon-180.png", sizes: "180x180", type: "image/png" },
+        { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+        { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: "/icons/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
       ],
     },
     null,

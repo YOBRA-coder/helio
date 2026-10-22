@@ -7,6 +7,7 @@ import {
 } from "@/lib/trading/auth-api";
 import { exportBackup, restoreBackup } from "@/lib/trading/desk-api";
 import { downloadText } from "@/lib/trading/format";
+import { useInstall } from "@/components/pwa";
 import { useDesk } from "@/lib/trading/store";
 
 export const Route = createFileRoute("/account")({
@@ -26,6 +27,7 @@ function AccountPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [delPw, setDelPw] = useState("");
+  const pwa = useInstall();
 
   const load = async () => {
     const [m, s] = await Promise.all([getMe(), getSettings()]);
@@ -146,6 +148,26 @@ function AccountPage() {
           <Button type="button" disabled={busy || !f.hook} onClick={() => void save({ webhookUrl: f.hook }, "Webhook saved.")}>Save</Button>
           <Button type="button" variant="quiet" disabled={busy || !view?.hasWebhook} onClick={() => void save({ clear: ["webhookUrl"] }, "Webhook removed.")}>Remove</Button>
         </div>
+      </Panel>
+
+      <Panel title="Install on this device" action={<Pill tone={pwa.standalone ? "good" : "neutral"}>{pwa.standalone ? "Installed" : "Not installed"}</Pill>}>
+        {pwa.standalone ? (
+          <p className="text-sm text-muted">You are running the installed app.</p>
+        ) : pwa.canPrompt ? (
+          <>
+            <p className="mb-3 text-sm text-muted">Adds Helios to your home screen so it opens full screen like an app.</p>
+            <Button type="button" onClick={() => void pwa.install()}>Install app</Button>
+          </>
+        ) : pwa.ios ? (
+          <p className="text-sm text-muted">On iPhone: open this page in Safari, tap the Share button, then <b>Add to Home Screen</b>.</p>
+        ) : !pwa.secure ? (
+          <p className="text-sm text-muted">Installing needs an https address. This page is on plain http, so the browser will not offer it. Open the https link of your deployed desk instead.</p>
+        ) : (
+          <p className="text-sm text-muted">
+            On Android Chrome: tap the ⋮ menu, then <b>Install app</b> (or <b>Add to Home screen</b>). If it is missing, reload the page once, visit a couple of pages,
+            and make sure you are not in a private tab. The browser only offers it after the page has loaded with the service worker running.
+          </p>
+        )}
       </Panel>
 
       <Panel title="Backup and restore">
