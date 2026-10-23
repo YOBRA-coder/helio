@@ -102,21 +102,26 @@ function DeskHome() {
       </div>
 
       <Panel title="Today">
-        <div className="grid gap-4 md:grid-cols-3">
-          <div>
+        <div className="grid min-w-0 gap-4 md:grid-cols-3">
+          <div className="min-w-0">
             <p className="text-xs uppercase tracking-wide text-muted">Settled today (real windows)</p>
             <p className="mt-1 font-mono text-xl tabular-nums">
               {todayRows.length} · {todayWins}W {todayRows.length - todayWins}L
             </p>
             <p className={`font-mono text-sm tabular-nums ${todayPnl >= 0 ? "text-primary" : "text-danger"}`}>{signedMoney(todayPnl)}</p>
           </div>
-          <div className="md:col-span-2">
+          <div className="min-w-0 md:col-span-2">
             <p className="text-xs uppercase tracking-wide text-muted">Open positions</p>
             <ul className="mt-1 space-y-1 text-sm">
               {openList.slice(0, 4).map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-3">
-                  <span className="min-w-0 flex-1 truncate">{p.group} · {p.side.toUpperCase()} · {p.question}</span>
-                  <Countdown end={p.endAt} />
+                <li key={p.id} className="flex min-w-0 items-start justify-between gap-3 rounded-md bg-raised px-3 py-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-medium text-muted">{p.group} · {p.side.toUpperCase()}</span>
+                    <span className="line-clamp-2 break-words">{p.question}</span>
+                  </span>
+                  <span className="shrink-0 pt-0.5 text-right">
+                    <Countdown end={p.endAt} />
+                  </span>
                 </li>
               ))}
               {openList.length === 0 && <li className="text-muted">None. Waiting for a signal that clears every gate.</li>}

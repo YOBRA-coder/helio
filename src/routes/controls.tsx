@@ -79,9 +79,9 @@ function ControlsPage() {
 
       <Panel title="Risk limits">
         <div className="grid gap-4 md:grid-cols-2">
-          <Slider label="Max stake" value={risk.maxStake} min={10} max={500} step={10} format={(n) => `$${n}`} onChange={(maxStake) => updateRisk({ maxStake })} />
-          <Slider label="Max open exposure" value={risk.maxExposure} min={50} max={2000} step={10} format={(n) => `$${n}`} onChange={(maxExposure) => updateRisk({ maxExposure })} />
-          <Slider label="Daily loss limit" value={risk.dailyLossLimit} min={20} max={1000} step={10} format={(n) => `$${n}`} onChange={(dailyLossLimit) => updateRisk({ dailyLossLimit })} />
+          <Slider label="Max stake" value={risk.maxStake} min={1} max={500} step={1} format={(n) => `$${n}`} onChange={(maxStake) => updateRisk({ maxStake })} />
+          <Slider label="Max open exposure" value={risk.maxExposure} min={5} max={2000} step={5} format={(n) => `$${n}`} onChange={(maxExposure) => updateRisk({ maxExposure })} />
+          <Slider label="Daily loss limit" value={risk.dailyLossLimit} min={2} max={1000} step={2} format={(n) => `$${n}`} onChange={(dailyLossLimit) => updateRisk({ dailyLossLimit })} />
           <Slider label="Drawdown breaker" value={risk.drawdownLimit} min={50} max={2000} step={10} format={(n) => `$${n}`} onChange={(drawdownLimit) => updateRisk({ drawdownLimit })} />
           <Slider label="Orders per hour" value={risk.maxOrdersPerHour} min={1} max={30} step={1} format={(n) => String(n)} onChange={(maxOrdersPerHour) => updateRisk({ maxOrdersPerHour })} />
           <Slider label="Minimum net edge" value={risk.minEdge} min={0} max={0.1} step={0.005} format={(n) => n.toFixed(3)} onChange={(minEdge) => updateRisk({ minEdge })} />

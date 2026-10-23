@@ -170,9 +170,9 @@ export function findMarket(s: Pick<DeskCore, "simMarkets" | "liveMarkets">, id: 
 
 export function sanitizeRisk(risk: RiskConfig): RiskConfig {
   return {
-    maxStake: clampNum(risk.maxStake, 10, 1000),
-    maxExposure: clampNum(risk.maxExposure, 50, 5000),
-    dailyLossLimit: clampNum(risk.dailyLossLimit, 20, 2000),
+    maxStake: clampNum(risk.maxStake, 1, 1000),
+    maxExposure: clampNum(risk.maxExposure, 5, 5000),
+    dailyLossLimit: clampNum(risk.dailyLossLimit, 2, 2000),
     drawdownLimit: clampNum(risk.drawdownLimit, 50, 3000),
     maxOrdersPerHour: Math.round(clampNum(risk.maxOrdersPerHour, 1, 60)),
     minEdge: clampNum(risk.minEdge, 0, 0.2),

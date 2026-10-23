@@ -417,3 +417,15 @@ test("live orders fail closed when the location is blocked or unknown", async ()
   const unknown = await submitLive(sdk, live, sig, market, plan, T0, async () => ({ blocked: null, where: "" }));
   assert.equal(unknown.status, "rejected");
 });
+
+test("max stake can be set as low as $1 and trades size to it", () => {
+  let s = applyTape(makeCore(T0), tape(T0, 0.3), { "poly-m1": 100_000 }, T0);
+  s = applyCommand(s, { type: "updateRisk", risk: { ...s.risk, maxStake: 1, minEdge: 0 } } as never, T0);
+  assert.equal(s.risk.maxStake, 1);
+  s = { ...s, mode: "auto" };
+  for (let i = 1; i <= 40; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_000, spotFresh: true, spotDtMs: 1000, sim: false });
+  const placed = s.signals.filter((x) => x.status === "executed");
+  for (const x of placed) assert.ok(x.stake <= 1.0001);
+  const tooSmall = applyCommand(s, { type: "updateRisk", risk: { ...s.risk, maxStake: 0.2 } } as never, T0);
+  assert.equal(tooSmall.risk.maxStake, 1);
+});

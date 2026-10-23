@@ -314,7 +314,7 @@ export function evaluateOpportunity(
 
   const scale = clamp(extra.context?.stakeScale ?? 1, 0, 1);
   const stake = Math.min(risk.maxStake * scale, Math.max(0, cash));
-  if (stake < 5) blocks.push("Paper balance is below the minimum stake");
+  if (stake < Math.min(1, risk.maxStake)) blocks.push("Paper balance is below the minimum stake");
   const shares = stake > 0 ? stake / (executablePrice * (1 + risk.feeRate)) : 0;
   const debit = shares * executablePrice * (1 + risk.feeRate);
   if (debit > 0 && exposure + debit > risk.maxExposure) {

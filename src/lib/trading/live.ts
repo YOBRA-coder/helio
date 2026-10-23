@@ -86,7 +86,10 @@ export function planLiveOrder(
   const stake = Math.min(live.maxStake, sig.stake, room);
   if (stake <= 0) return { refused: "Live exposure cap reached" };
   const size = Math.floor((stake / price) * 100) / 100;
-  if (size < MIN_ORDER_SHARES) return { refused: `Stake too small for the ${MIN_ORDER_SHARES}-share minimum` };
+  if (size < MIN_ORDER_SHARES) {
+    const need = MIN_ORDER_SHARES * price;
+    return { refused: `Polymarket needs at least ${MIN_ORDER_SHARES} shares: $${need.toFixed(2)} at ${Math.round(price * 100)}¢, but the cap here is $${stake.toFixed(2)}. Raise the live cap or skip this one.` };
+  }
   return { plan: { tokenId, price, size, cost: size * price } };
 }
 
