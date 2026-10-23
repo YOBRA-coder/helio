@@ -89,7 +89,8 @@ function BookPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Pill tone={position.status === "open" ? "good" : "neutral"}>{position.status}</Pill>
                   <Pill>{position.kind === "live" ? "Polymarket paper" : "Sim"}</Pill>
-                  <Pill>{position.side}</Pill>
+                  <Pill>{sideLabel(position.question, position.side)}</Pill>
+                  {position.status === "settled" && <Pill tone={position.realized >= 0 ? "good" : "bad"}>{position.realized >= 0 ? "Trade won" : "Trade lost"}</Pill>}
                 </div>
                 <h2 className="mt-2 text-lg font-semibold">{position.question}</h2>
                 <p className="mt-2 font-mono text-sm tabular-nums text-muted">
@@ -108,7 +109,9 @@ function BookPage() {
                     <Row k="Net edge at entry" v={position.edgeAtEntry.toFixed(3)} />
                     <Row k="Fees" v={money(position.fees)} />
                     <Row k="Model" v={position.modelVersion} />
-                    <Row k="Result" v={position.yesWon == null ? "open / not official" : position.yesWon ? "Up won" : "Down won"} />
+                    <Row k="Your bet" v={`${sideLabel(position.question, position.side)} at ${px(position.averageCost)}`} />
+                    <Row k="Window result" v={position.yesWon == null ? "not official / open" : upDownWon(position.question, position.yesWon)} />
+                    <Row k="Your trade" v={position.status === "open" ? "open" : position.realized >= 0 ? "WON" : "LOST"} />
                   </dl>
                   {(hist[position.marketId]?.length ?? 0) > 2 && (
                     <div className="mt-3">
@@ -160,6 +163,14 @@ function BookPage() {
       )}
     </div>
   );
+}
+
+const isUpDown = (q: string) => /up or down/i.test(q);
+function sideLabel(question: string, side: string) {
+  return isUpDown(question) ? (side === "yes" ? "Bet: Up" : "Bet: Down") : side === "yes" ? "Bet: Yes" : "Bet: No";
+}
+function upDownWon(question: string, yesWon: boolean) {
+  return isUpDown(question) ? (yesWon ? "Up won" : "Down won") : yesWon ? "Yes won" : "No won";
 }
 
 function Row({ k, v }: { k: string; v: string }) {

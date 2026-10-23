@@ -308,6 +308,10 @@ export function evaluateOpportunity(
   if (executablePrice < 0.08 || executablePrice > 0.92) {
     blocks.push("Executable price is outside the 8¢–92¢ band");
   }
+  const midYes = (market.yesBid + market.yesAsk) / 2;
+  if (market.kind !== "sim-window" && Math.abs(p - midYes) > 0.2) {
+    blocks.push(`Model (${Math.round(p * 100)}%) and market (${Math.round(midYes * 100)}%) disagree by over 20 points: treated as a data problem, not an edge`);
+  }
   if (edge < risk.minEdge) {
     blocks.push(`Net edge ${edge.toFixed(3)} is below the minimum ${risk.minEdge.toFixed(3)}`);
   }

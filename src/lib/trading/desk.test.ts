@@ -429,3 +429,19 @@ test("max stake can be set as low as $1 and trades size to it", () => {
   const tooSmall = applyCommand(s, { type: "updateRisk", risk: { ...s.risk, maxStake: 0.2 } } as never, T0);
   assert.equal(tooSmall.risk.maxStake, 1);
 });
+
+test("a window noticed mid-way never takes the current price as its open", () => {
+  const t = tape(T0);
+  t.markets[0].startAt = T0 - 20_000; // started 20s ago
+  const s = applyTape(makeCore(T0), t, {}, T0);
+  assert.equal(s.liveMarkets[0].openSpot, null);
+  assert.equal(s.liveMarkets[0].metadataOk, false);
+});
+
+test("model far from the market is blocked as a data problem", () => {
+  let s = applyTape(makeCore(T0), tape(T0, 0.2), { "poly-m1": 100_000 }, T0);
+  s = { ...s, mode: "auto", risk: { ...s.risk, minEdge: 0 } };
+  for (let i = 1; i <= 40; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_000, spotFresh: true, spotDtMs: 1000, sim: false });
+  assert.ok(!s.signals.some((x) => x.kind === "live" && x.status === "executed"));
+  assert.ok(s.signals.some((x) => /disagree by over 20 points/.test(x.rejectedReason ?? "")));
+});

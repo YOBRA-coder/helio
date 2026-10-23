@@ -245,9 +245,8 @@ export function applyTape(s: DeskCore, tape: TapePayload, opens: Record<string, 
     const prev = prevById.get(next.id);
     const upDown = /up or down/i.test(next.question);
     let openSpot = prev?.openSpot ?? opens[next.id] ?? null;
-    if (upDown && openSpot == null && tape.spot && next.startAt > 0 && next.startAt <= now && now - next.startAt < 45_000) {
-      openSpot = tape.spot;
-    }
+    // The window-open price must be the real print at the start (candle or our own recorded tick).
+    // Using "the price when we noticed the window" gives a fake open and a fake edge, so it is never done.
     const metadataOk = next.metadataOk || (upDown && openSpot != null && !next.restricted);
     if (prev && prev.source === "Polymarket CLOB" && prev.updatedAt > fetchedAt) {
       return {
