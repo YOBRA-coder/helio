@@ -24,8 +24,9 @@
     "backtest": "node --experimental-strip-types --no-warnings scripts/backtest.ts",
     "doctor": "node --experimental-strip-types --no-warnings scripts/doctor.ts",
     "start:all": "node scripts/start-all.mjs",
-  "build:vps": "NITRO_PRESET=node-server npm run build",
-    "start:vps": "node .output/server/index.mjs"
+    "build:vps": "NITRO_PRESET=node-server npm run build",
+    "start:vps": "node .output/server/index.mjs",
+    "neon:check": "node scripts/neon-check.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

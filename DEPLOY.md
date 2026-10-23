@@ -92,11 +92,29 @@ sudo ufw allow OpenSSH && sudo ufw allow 80 && sudo ufw allow 443 && sudo ufw en
 - Worker alive: the top bar of the app shows the worker status; it turns stale if the heartbeat is older than 20 seconds.
 - Phone alerts: set an ntfy URL on the Account page. You get a message when trades settle and a daily summary. A silent day can mean the worker died, so also check the app.
 
+## No persistent disk? Use Neon (free Postgres)
+Helios keeps its data as files. On a host without a disk those files vanish on every restart (you get signed out and your account disappears).
+Setting a Postgres URL makes the container save them to Postgres and restore them at boot, so no disk is needed.
+1. Create a free project at neon.com, copy the **connection string** (use the *pooled* one if offered).
+2. In your service's environment add `HELIOS_DATABASE_URL=<that string>`. Keep `HELIOS_MASTER_KEY` fixed forever.
+3. Redeploy. The logs should say `Postgres storage is on` and `restored N file(s)`.
+4. Check anytime with `npm run neon:check` (shows the saved files).
+
+What gets saved, and when:
+- Accounts, sessions and saved exchange keys (encrypted): within about 10 seconds of a change.
+- The paper desk (book, scores, limits): every 15 minutes (`HELIOS_CHECKPOINT_MIN`) and once more when the container shuts down cleanly (redeploys, restarts).
+- If the container is killed without warning you can lose up to 15 minutes of paper-trade history.
+
+Why 15 minutes and not every few seconds: Neon's free plan gives 100 compute-hours a month and sleeps after 5 idle minutes. Constant writes would keep it awake all month and use the quota up.
+
+Limits: this fixes durability, not uptime. A free web instance that sleeps still stops the worker, so for a real week-long trial use an always-on instance.
+If a Render Disk is attached as well, the files on the disk are used and Postgres is just a backup.
+
 ## Render, Railway, Fly (one container)
 These hosts run one process per service, so the Docker image's default command (`scripts/start-all.mjs`) starts the web app **and** the worker together.
 1. New Web Service from this repo, runtime **Docker**.
 2. Environment: `HELIOS_MASTER_KEY` (required), `HELIOS_COOKIE_SECURE=1`, `HELIOS_DATA_DIR=/data`, `HELIOS_ALLOW_SIGNUP=1` until you have an account, then `0`.
-3. **Add a persistent disk mounted at `/data`.** Without it, every deploy or restart wipes users, keys and the trial record.
+3. **Add a persistent disk mounted at `/data`** (or use Neon above). Without one of them, every deploy or restart wipes users, keys and the trial record.
 4. **Use an always-on paid instance.** Free instances go to sleep after about 15 minutes without visitors, which also stops the worker, so a "week-long" paper trial would not run.
 5. Do not run a separate "background worker" service: services cannot share a disk, so the worker would never see your desk. The single container is correct.
 6. Open `https://<your-service>.onrender.com`, sign up, then check the Desk page: the "worker has not started" banner should clear within about 10 seconds.

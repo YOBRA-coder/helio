@@ -65,3 +65,4 @@ Included unchanged next to this folder. It is the execution toolbox (maker-rebat
 - Account page: backup/restore and phone alerts (ntfy, Telegram, Discord, Slack).
 - `npm run doctor` checks which data sources this machine can reach. VPS: see DEPLOY.md.
 - Practice windows are off by default. `HELIOS_SIM_WINDOWS=1` turns them on.
+- Storage without a disk: set `HELIOS_DATABASE_URL` (Neon). See DEPLOY.md. `npm run neon:check` shows what is saved.
