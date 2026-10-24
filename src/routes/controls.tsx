@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button, Panel, ThemeSwatches } from "@/components/widgets";
 import { MODEL_VERSION } from "@/lib/trading/engine";
 import { useDesk } from "@/lib/trading/store";
@@ -200,20 +200,42 @@ function Slider({
   format: (n: number) => string;
   onChange: (value: number) => void;
 }) {
+  // The thumb follows the finger instantly; the setting is sent once, when the finger lifts.
+  const [draft, setDraft] = useState<number | null>(null);
+  const timer = useRef<number | null>(null);
+  const latest = useRef<number | null>(null);
+  const commit = () => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    if (latest.current != null) onChange(latest.current);
+    latest.current = null;
+    setDraft(null);
+  };
+  const shown = draft ?? value;
   return (
     <label className="block text-sm">
       <span className="flex items-center justify-between gap-3">
         <span>{label}</span>
-        <span className="font-mono tabular-nums text-primary">{format(value)}</span>
+        <span className="font-mono tabular-nums text-primary">{format(shown)}</span>
       </span>
       <input
-        className="mt-2"
+        className="mt-2 touch-pan-y"
         type="range"
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        value={shown}
+        onChange={(event) => {
+          const v = Number(event.target.value);
+          latest.current = v;
+          setDraft(v);
+          if (timer.current) window.clearTimeout(timer.current);
+          timer.current = window.setTimeout(commit, 700); // safety net if no release event arrives
+        }}
+        onPointerUp={commit}
+        onTouchEnd={commit}
+        onKeyUp={commit}
+        onBlur={commit}
         aria-label={label}
       />
     </label>

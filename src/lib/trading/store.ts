@@ -83,6 +83,8 @@ function writeLocal(core: DeskCore) {
   }
 }
 
+let pending: { risk?: Partial<RiskConfig>; mode?: Mode; killed?: boolean; at: number } | null = null;
+
 function localTrial(core: DeskCore, now: number): DeskState["trial"] {
   const summary = summarize(core, now, STARTING_CASH);
   const gate = evaluateGate(summary, core.risk.drawdownLimit, DEFAULT_GATE);
@@ -132,8 +134,15 @@ export const useDesk = create<DeskState>((set, get) => ({
       const view = await getDesk();
       if (view.core) {
         const alive = view.alive;
+        // keep a just-changed setting on screen until the worker has applied it
+        const hold = pending && Date.now() - pending.at < 6000 ? pending : null;
+        if (pending && !hold) pending = null;
+        if (hold?.risk && Object.entries(hold.risk).every(([k, v]) => (view.core!.risk as unknown as Record<string, unknown>)[k] === v)) pending = null;
         set({
           ...view.core,
+          ...(hold?.risk ? { risk: { ...view.core.risk, ...hold.risk } } : {}),
+          ...(hold?.mode ? { mode: hold.mode } : {}),
+          ...(hold?.killed != null ? { killed: hold.killed } : {}),
           source: alive ? "server" : "server-offline",
           workerAlive: alive,
           heartbeatAgeMs: view.heartbeatAgeMs,
@@ -212,6 +221,17 @@ export const useDesk = create<DeskState>((set, get) => ({
       set({ ...core, now, trial: localTrial(core, now) });
       writeLocal(core);
       return;
+    }
+    // show the change immediately; the worker confirms it a moment later
+    if (cmd.type === "updateRisk") {
+      pending = { ...pending, risk: { ...pending?.risk, ...cmd.risk }, at: Date.now() };
+      set({ risk: { ...s.risk, ...cmd.risk } });
+    } else if (cmd.type === "setMode") {
+      pending = { ...pending, mode: cmd.mode, at: Date.now() };
+      set({ mode: cmd.mode });
+    } else if (cmd.type === "setKilled") {
+      pending = { ...pending, killed: cmd.on, at: Date.now() };
+      set({ killed: cmd.on });
     }
     if (s.source === "server-offline") {
       set({ commandNote: "The desk worker is offline. Start it with npm run worker; commands queue until it is back." });

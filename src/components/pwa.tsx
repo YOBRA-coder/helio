@@ -66,3 +66,43 @@ export function useInstall() {
     },
   };
 }
+
+/** Reloads the app so the newest version loads. Also asks the browser to refresh its service worker. */
+export async function reloadApp() {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await reg?.update();
+  } catch {
+    /* reload anyway */
+  }
+  location.reload();
+}
+
+/** True when the server is running a newer build than the one loaded in this tab. Checks every minute and on return to the app. */
+export function useUpdateAvailable() {
+  const [stale, setStale] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const check = async () => {
+      try {
+        const { getVersion } = await import("@/lib/trading/desk-api");
+        const v = await getVersion();
+        if (live && v.build && v.build !== __BUILD_ID__) setStale(true);
+      } catch {
+        /* offline or server restarting: try again later */
+      }
+    };
+    const timer = window.setInterval(check, 60_000);
+    const onVisible = () => document.visibilityState === "visible" && void check();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", check);
+    void check();
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", check);
+    };
+  }, []);
+  return stale;
+}

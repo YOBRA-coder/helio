@@ -143,7 +143,10 @@ function authPopupPlugin(): Plugin {
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
+const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.SOURCE_VERSION || process.env.GIT_COMMIT || String(Date.now());
+
 export default defineConfig(({ command, isPreview }) => ({
+  define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
   server: {
     host: "0.0.0.0",
     port: 8080,

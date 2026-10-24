@@ -156,3 +156,6 @@ export const restoreBackup = createServerFn({ method: "POST" })
     await writeRestore(dir, JSON.stringify({ core: c }));
     return { ok: true };
   });
+
+/** The build the server is running. The browser compares it with its own to offer an update. */
+export const getVersion = createServerFn({ method: "GET" }).handler(async (): Promise<{ build: string }> => ({ build: __BUILD_ID__ }));

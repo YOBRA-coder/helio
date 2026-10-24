@@ -7,6 +7,7 @@ import {
   Gauge,
   LayoutDashboard,
   Menu,
+  RefreshCw,
   X,
   Radar,
   ScrollText,
@@ -19,7 +20,7 @@ import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "
 import { cn } from "@/lib/cn";
 import { MODEL_VERSION, THEMES } from "@/lib/trading/engine";
 import { remain } from "@/lib/trading/format";
-import { useInstall } from "@/components/pwa";
+import { reloadApp, useInstall, useUpdateAvailable } from "@/components/pwa";
 import { useDesk } from "@/lib/trading/store";
 
 /** The four tabs that stay on the phone bar; everything else lives behind "More". */
@@ -54,6 +55,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [more, setMore] = useState(false);
   const pwa = useInstall();
+  const updateReady = useUpdateAvailable();
+  const [spinning, setSpinning] = useState(false);
   useEffect(() => {
     setMore(false);
     setOpen(false);
@@ -163,7 +166,8 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <div className="mx-auto grid max-w-6xl gap-6 px-4 py-5 md:grid-cols-[12rem_1fr]">
         <nav className="hidden md:block">
-          <ul className="sticky top-24 space-y-1">
+          <div className="sticky top-24">
+          <ul className="space-y-1">
             {NAV.map((item) => {
               const active = pathname === item.to;
               const Icon = item.icon;
@@ -183,6 +187,11 @@ export function Shell({ children }: { children: ReactNode }) {
               );
             })}
           </ul>
+          <button type="button" onClick={() => { setSpinning(true); void reloadApp(); }} className="mt-4 flex h-11 w-full items-center gap-2 rounded-md px-3 text-sm text-muted hover:bg-raised hover:text-fg">
+            <RefreshCw className={cn("size-4", spinning && "animate-spin")} />
+            Reload app
+          </button>
+          </div>
         </nav>
         <main className="min-w-0 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-10">
           <div className="glow pointer-events-none -mx-4 -mt-5 mb-4 h-16" />
@@ -190,6 +199,12 @@ export function Shell({ children }: { children: ReactNode }) {
             <p className="text-xs font-medium uppercase tracking-wide text-muted">{page}</p>
             <ThemeRail />
           </div>
+          {updateReady && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary bg-primary-soft px-4 py-3 text-sm" role="status">
+              <span>A new version of Helios is ready.</span>
+              <button type="button" onClick={() => void reloadApp()} className="h-11 rounded-lg bg-primary px-4 font-semibold text-primary-fg">Update now</button>
+            </div>
+          )}
           {source === "local" && (
             <div className="mb-4 rounded-lg border border-line bg-surface px-4 py-3 text-sm text-muted">
               Browser desk: paper trading runs in this tab only and stops when you close it.{" "}
@@ -230,6 +245,10 @@ export function Shell({ children }: { children: ReactNode }) {
           <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-line bg-surface px-4 pt-4 shadow-2xl" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1rem)" }}>
             <div className="mb-3 flex items-center justify-between">
               <p className="text-sm font-semibold">More</p>
+              <button type="button" onClick={() => { setSpinning(true); void reloadApp(); }} className="ml-auto mr-2 inline-flex h-11 items-center gap-2 rounded-full border border-line px-4 text-sm">
+                <RefreshCw className={cn("size-4", spinning && "animate-spin")} />
+                Reload app
+              </button>
               <button type="button" aria-label="Close" onClick={() => setMore(false)} className="grid size-11 place-items-center rounded-full border border-line">
                 <X className="size-4" />
               </button>
