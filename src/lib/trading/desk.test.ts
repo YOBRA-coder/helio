@@ -300,7 +300,7 @@ test("real backtest runs chronologically, produces three slices and a verdict", 
   assert.equal(r.periods.map((p) => p.name).join(), "train,validation,test");
   assert.equal(r.marketsUsed, 400);
   assert.ok(r.brier && r.brier.n === 400);
-  assert.ok(r.sweep.length === 12);
+  assert.ok(r.sweep.length === 18);
   assert.ok(typeof r.verdict === "string" && r.verdict.length > 10);
   // efficient market that already prices the spot move: no edge after costs, so no gold mine
   assert.ok(r.periods[2].netPnl < 150, `suspiciously profitable vs an efficient market: ${r.periods[2].netPnl}`);
@@ -438,10 +438,44 @@ test("a window noticed mid-way never takes the current price as its open", () =>
   assert.equal(s.liveMarkets[0].metadataOk, false);
 });
 
-test("model far from the market is blocked as a data problem", () => {
+test("model far from the market (25+ points) is blocked as a data problem", () => {
   let s = applyTape(makeCore(T0), tape(T0, 0.2), { "poly-m1": 100_000 }, T0);
   s = { ...s, mode: "auto", risk: { ...s.risk, minEdge: 0 } };
   for (let i = 1; i <= 40; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_000, spotFresh: true, spotDtMs: 1000, sim: false });
   assert.ok(!s.signals.some((x) => x.kind === "live" && x.status === "executed"));
-  assert.ok(s.signals.some((x) => /disagree by over 20 points/.test(x.rejectedReason ?? "")));
+  assert.ok(s.signals.some((x) => /disagree by over 25 points/.test(x.rejectedReason ?? "")));
+});
+
+import { fitBlend } from "./blend.ts";
+import { feePerShare } from "./engine.ts";
+
+test("fee follows Polymarket's curve: about 1.75c per share at 50c, tiny near the edges", () => {
+  const r = { feeRate: 0, feeCoef: 0.07 };
+  assert.ok(Math.abs(feePerShare(0.5, r) - 0.0175) < 1e-9);
+  assert.ok(feePerShare(0.95, r) < 0.004);
+  assert.ok(feePerShare(0.2, r) > feePerShare(0.9, r));
+});
+
+test("blend weight is learned from settled trades: 0 when the model adds nothing, high when it does", () => {
+  const mk = (i: number, p: number, mid: number, yes: boolean): ScoreRow => ({
+    id: `b${i}`, marketId: "m", question: "q", kind: "live", group: "5m", side: "yes", entryAt: T0, settledAt: T0 + i, minutesToExpiry: 5,
+    entryPrice: 0.5, quantity: 1, fees: 0, pnl: 0, pYesBase: p, pYesCtx: p, marketMid: mid, yesWon: yes, edgeAtEntry: 0.1, official: true,
+  } as unknown as ScoreRow);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
+  // model is pure noise around a market that is right
+  const noise: ScoreRow[] = [];
+  for (let i = 0; i < 300; i += 1) {
+    const truth = rnd() < 0.5;
+    noise.push(mk(i, rnd() < 0.5 ? 0.85 : 0.15, truth ? 0.8 : 0.2, rnd() < (truth ? 0.8 : 0.2)));
+  }
+  assert.ok(fitBlend(noise, T0).w < 0.3, `noise model should be trusted little, got ${fitBlend(noise, T0).w}`);
+  // model is informative where the market is flat
+  const good: ScoreRow[] = [];
+  for (let i = 0; i < 300; i += 1) {
+    const yes = rnd() < 0.5;
+    good.push(mk(i, yes ? 0.8 : 0.2, 0.5, rnd() < (yes ? 0.8 : 0.2)));
+  }
+  assert.ok(fitBlend(good, T0).w > 0.7);
+  assert.equal(fitBlend(good.slice(0, 10), T0).w, 0.5);
 });

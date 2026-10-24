@@ -54,7 +54,7 @@ export interface DeskState extends DeskCore {
 const CORE_KEYS: Array<keyof DeskCore> = [
   "risk", "mode", "killed", "cash", "simMarkets", "liveMarkets", "signals", "orders", "fills", "positions", "alerts",
   "audit", "curve", "dayKey", "dayStartEquity", "peakEquity", "circuitKind", "reconcileNote", "spot", "spotSource",
-  "spots", "spotDtMs", "tickCount", "scores", "hist", "context", "trialStartedAt", "live",
+  "spots", "spotDtMs", "tickCount", "scores", "blend", "hist", "context", "trialStartedAt", "live",
 ];
 
 function pickCore(s: DeskState): DeskCore {

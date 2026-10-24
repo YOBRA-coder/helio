@@ -38,6 +38,9 @@ export interface TrialSummary {
   brierEdge: number | null;
   byGroup: Bucket[];
   byTtx: Bucket[];
+  bySide: Bucket[];
+  byEdge: Bucket[];
+  last24h: { trades: number; wins: number; pnl: number };
   pnls: number[];
   calibration: Array<{ p: number; won: number; n: number }>;
   sim: { trades: number; netPnl: number };
@@ -149,6 +152,12 @@ export function summarize(core: Pick<DeskCore, "scores" | "trialStartedAt">, now
     brierEdge: brierModel != null && brierMarket != null ? brierMarket - brierModel : null,
     byGroup: bucketOf(real, (r) => r.group),
     byTtx: bucketOf(real, (r) => ttxLabel(r.minutesToExpiry)),
+    bySide: bucketOf(real, (r) => (r.side === "yes" ? "Bet Up / Yes" : "Bet Down / No")),
+    byEdge: bucketOf(real, (r) => (r.edgeAtEntry < 0.05 ? "edge under 5¢" : r.edgeAtEntry < 0.1 ? "edge 5–10¢" : "edge 10¢+")).sort((a, b) => a.key.localeCompare(b.key)),
+    last24h: (() => {
+      const rows = real.filter((r) => now - r.settledAt < 86_400_000);
+      return { trades: rows.length, wins: rows.filter((r) => r.pnl > 0).length, pnl: rows.reduce((a, r) => a + r.pnl, 0) };
+    })(),
     pnls: real.map((r) => r.pnl),
     calibration: calibrate(official),
     sim: { trades: sim.length, netPnl: sim.reduce((a, r) => a + r.pnl, 0) },

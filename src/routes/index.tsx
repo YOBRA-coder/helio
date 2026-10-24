@@ -31,10 +31,7 @@ function DeskHome() {
   const flatten = useDesk((s) => s.flatten);
   const scores = useDesk((s) => s.trial?.summary);
 
-  const dayStartMs = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
-  const todayRows = (useDesk((s) => s.trial?.recent) ?? []).filter((r) => r.kind === "live" && r.settledAt >= dayStartMs);
-  const todayWins = todayRows.filter((r) => r.pnl > 0).length;
-  const todayPnl = todayRows.reduce((a, r) => a + r.pnl, 0);
+  const day = useDesk((s) => s.trial?.summary.last24h) ?? { trades: 0, wins: 0, pnl: 0 };
   const openList = positions.filter((p) => p.status === "open").sort((a, b) => a.endAt - b.endAt);
   const reserved = orders.filter((o) => o.status === "open").reduce((sum, o) => sum + o.debit, 0);
   const marks = positions.filter((p) => p.status === "open").reduce((sum, p) => sum + p.quantity * p.lastMark, 0);
@@ -94,21 +91,21 @@ function DeskHome() {
         <Stat label="BTC reference" value={spot ? money(spot, 0) : "—"} hint={spotSource} />
         <Stat label="Paper equity" value={booted ? money(equity, 0) : "—"} hint="Cash, reserved, and marks" />
         <Stat
-          label="Day P&L"
+          label="Equity change today"
           value={booted ? signedMoney(equity - dayStart) : "—"}
-          hint="Simulated session"
+          hint="Paper book incl. open positions"
         />
         <Stat label="Open exposure" value={booted ? money(exposure, 0) : "—"} hint="Cost of positions and resting orders" />
       </div>
 
-      <Panel title="Today">
+      <Panel title="Last 24 hours">
         <div className="grid min-w-0 gap-4 md:grid-cols-3">
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-wide text-muted">Settled today (real windows)</p>
+            <p className="text-xs uppercase tracking-wide text-muted">Last 24 hours · real windows only</p>
             <p className="mt-1 font-mono text-xl tabular-nums">
-              {todayRows.length} · {todayWins}W {todayRows.length - todayWins}L
+              {day.trades} · {day.wins}W {day.trades - day.wins}L
             </p>
-            <p className={`font-mono text-sm tabular-nums ${todayPnl >= 0 ? "text-primary" : "text-danger"}`}>{signedMoney(todayPnl)}</p>
+            <p className={`font-mono text-sm tabular-nums ${day.pnl >= 0 ? "text-primary" : "text-danger"}`}>{signedMoney(day.pnl)}</p>
           </div>
           <div className="min-w-0 md:col-span-2">
             <p className="text-xs uppercase tracking-wide text-muted">Open positions</p>

@@ -20,6 +20,7 @@ function TrialPage() {
   const resetTrial = useDesk((s) => s.resetTrial);
   const [confirm, setConfirm] = useState(false);
   const sum = trial?.summary;
+  const blend = useDesk((s) => s.blend);
 
   return (
     <div className="space-y-4">
@@ -109,6 +110,28 @@ function TrialPage() {
         </Panel>
       )}
 
+      <Panel title="Model trust (learned from your own settled trades)">
+        <p className="font-mono text-3xl tabular-nums">{Math.round(blend.w * 100)}%</p>
+        <p className="mt-2 text-sm text-muted">
+          The desk never trades the raw model. It trades the market price plus this share of the model's disagreement with it.
+          {blend.n < 40
+            ? ` Still on the starting value of 50%: it needs 40 settled real windows to learn (${blend.n} so far).`
+            : ` Fitted on ${blend.n} settled real windows: model accuracy ${blend.brierModel?.toFixed(4)}, market ${blend.brierMarket?.toFixed(4)}, blend ${blend.brierBlend?.toFixed(4)} (lower is better).`}
+          {blend.n >= 40 && blend.w < 0.15 ? " A low number means the model adds little beyond the market, so expect very few trades." : ""}
+        </p>
+      </Panel>
+
+      <Panel title="Where the results come from">
+        <p className="mb-3 text-sm text-muted">
+          Only segments with 20+ trades are judged. A segment marked <b>losing</b> has an average result below zero even after allowing for luck.
+          Do not tune the strategy on small segments, they flip back and forth.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Insight title="By side" rows={sum?.bySide ?? []} pnls={sum?.pnls} />
+          <Insight title="By edge size at entry" rows={sum?.byEdge ?? []} pnls={sum?.pnls} />
+        </div>
+      </Panel>
+
       <div className="grid gap-4 md:grid-cols-2">
         <Breakdown title="By window" rows={sum?.byGroup ?? []} />
         <Breakdown title="By time to expiry at entry" rows={sum?.byTtx ?? []} />
@@ -193,5 +216,29 @@ function Breakdown({ title, rows }: { title: string; rows: Bucket[] }) {
         {rows.length === 0 && <li className="text-muted">No data yet.</li>}
       </ul>
     </Panel>
+  );
+}
+
+function Insight({ title, rows }: { title: string; rows: Bucket[]; pnls?: number[] }) {
+  return (
+    <div>
+      <p className="mb-2 text-xs uppercase tracking-wide text-muted">{title}</p>
+      <ul className="space-y-2 text-sm">
+        {rows.map((b) => {
+          const exp = b.trades ? b.pnl / b.trades : 0;
+          const judged = b.trades >= 20;
+          return (
+            <li key={b.key} className="flex items-center justify-between gap-3 font-mono tabular-nums">
+              <span className="min-w-0 flex-1 truncate font-sans">{b.key}</span>
+              <span className="text-muted">{b.trades}×</span>
+              <span className="text-muted">{b.trades ? pct(b.wins / b.trades) : "—"}</span>
+              <span className={b.pnl >= 0 ? "text-primary" : "text-danger"}>{signedMoney(b.pnl)}</span>
+              <span className="w-16 text-right font-sans text-xs">{!judged ? "too few" : exp < 0 ? <b className="text-danger">losing</b> : "ok"}</span>
+            </li>
+          );
+        })}
+        {rows.length === 0 && <li className="text-muted">No data yet.</li>}
+      </ul>
+    </div>
   );
 }

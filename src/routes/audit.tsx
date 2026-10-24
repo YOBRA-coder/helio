@@ -12,29 +12,11 @@ function AuditPage() {
   const audit = useDesk((s) => s.audit);
   const signals = useDesk((s) => s.signals);
   const positions = useDesk((s) => s.positions);
-  const fills = useDesk((s) => s.fills);
-  const curve = useDesk((s) => s.curve);
   const settled = positions.filter((p) => p.status === "settled");
-  const wins = settled.filter((p) => p.realized > 0);
-  const losses = settled.filter((p) => p.realized < 0);
-  const net = settled.reduce((sum, p) => sum + p.realized, 0);
-  const fees = fills.reduce((sum, f) => sum + f.fee, 0);
-  const grossWin = wins.reduce((sum, p) => sum + p.realized, 0);
-  const grossLoss = losses.reduce((sum, p) => sum + -p.realized, 0);
-  const peak = curve.reduce((m, p) => Math.max(m, p.equity), curve[0]?.equity ?? 0);
-  let maxDd = 0;
-  let running = curve[0]?.equity ?? 0;
-  for (const point of curve) {
-    running = Math.max(running, point.equity);
-    maxDd = Math.max(maxDd, running - point.equity);
-  }
-  const buckets = [0.2, 0.4, 0.6, 0.8, 1];
-  const calibration = buckets.map((hi, index) => {
-    const lo = index === 0 ? 0 : buckets[index - 1];
-    const rows = settled.filter((p) => p.yesWon != null && p.entryYesProb > lo && p.entryYesProb <= hi);
-    const hit = rows.filter((p) => p.yesWon).length;
-    return { label: `${Math.round(lo * 100)}–${Math.round(hi * 100)}%`, n: rows.length, hit: rows.length ? hit / rows.length : 0 };
-  });
+  // Headline numbers come from the same record as the Trial page: every settled trade on a real Polymarket window.
+  // (The positions list in the browser is capped at the latest 80, so it cannot be used for totals.)
+  const sum = useDesk((s) => s.trial?.summary);
+  const calibration = (sum?.calibration ?? []).map((c) => ({ label: `${Math.round(c.p * 100)}%`, n: c.n, hit: c.won }));
 
   function exportDecisions() {
     const rows: Array<Array<string | number>> = [
@@ -88,26 +70,30 @@ function AuditPage() {
         </Button>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Mini label="Settled trades" value={String(settled.length)} />
-        <Mini label="Win rate" value={settled.length ? pct(wins.length / settled.length) : "—"} />
-        <Mini label="Avg win / loss" value={`${wins.length ? money(grossWin / wins.length) : "—"} / ${losses.length ? money(grossLoss / losses.length) : "—"}`} />
-        <Mini label="Net P&L" value={signedMoney(net)} />
-        <Mini label="Fees" value={money(fees)} />
-        <Mini label="Profit factor" value={grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : "—"} />
-        <Mini label="Expectancy" value={settled.length ? signedMoney(net / settled.length) : "—"} />
-        <Mini label="Max drawdown" value={money(maxDd || Math.max(0, peak - (curve.at(-1)?.equity ?? peak)))} />
+        <Mini label="Settled trades (real windows)" value={String(sum?.trades ?? 0)} />
+        <Mini label="Win rate" value={sum?.trades ? pct(sum.winRate) : "—"} />
+        <Mini label="Avg win / loss" value={`${sum?.wins ? money(sum.avgWin) : "—"} / ${sum?.losses ? money(Math.abs(sum.avgLoss)) : "—"}`} />
+        <Mini label="Net P&L" value={signedMoney(sum?.netPnl ?? 0)} />
+        <Mini label="Fees" value={money(sum?.fees ?? 0)} />
+        <Mini label="Profit factor" value={sum && Number.isFinite(sum.profitFactor) && sum.profitFactor > 0 ? sum.profitFactor.toFixed(2) : "—"} />
+        <Mini label="Expectancy per trade" value={sum?.trades ? signedMoney(sum.expectancy) : "—"} />
+        <Mini label="Max drawdown" value={money(sum?.maxDrawdown ?? 0)} />
       </div>
-      <Panel title="Calibration on simulated settlements">
+      <p className="text-sm text-muted">
+        Same record as the Trial page. Practice windows are excluded{sum && sum.sim.trades > 0 ? ` (${sum.sim.trades} practice trades, ${signedMoney(sum.sim.netPnl)}, not counted)` : ""}. The Book page shows the paper
+        account, which also includes practice trades and open positions, so its totals differ on purpose.
+      </p>
+      <Panel title="Calibration on real settlements">
         <ul className="space-y-2 text-sm">
           {calibration.map((bucket) => (
             <li key={bucket.label} className="flex items-center justify-between gap-3 font-mono tabular-nums">
-              <span>Model {bucket.label}</span>
+              <span>Model ≈ {bucket.label}</span>
               <span className="text-muted">{bucket.n} settled</span>
               <span>{bucket.n ? pct(bucket.hit) : "—"} hit</span>
             </li>
           ))}
         </ul>
-        <p className="mt-3 text-sm text-muted">Hit rate is how often Yes won, not how often the trade made money.</p>
+        <p className="mt-3 text-sm text-muted">Hit rate is how often Up/Yes won at that model probability, not how often the trade made money.</p>
       </Panel>
       <Panel title="Audit trail">
         <ul className="space-y-3">

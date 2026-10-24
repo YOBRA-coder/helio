@@ -24,7 +24,14 @@ export function momentumProbability(baseP: number, spots: number[], spot: number
   return clamp(baseP + clamp(move / sigma, -2, 2) * 0.02, 0.04, 0.96);
 }
 
-export const MODEL_VERSION = "helios-btc-0.4";
+export const MODEL_VERSION = "helios-btc-0.5";
+/** Up/Down windows: wait this long after the open before trading (the open print and early noise dominate). */
+export const ENTRY_DELAY_MS = 45_000;
+
+/** Taker fee per share at a given price. Polymarket's crypto fee peaks at 50¢ (about 1.75¢ per share) and shrinks toward the edges. */
+export function feePerShare(price: number, risk: Pick<RiskConfig, "feeRate" | "feeCoef">) {
+  return price * risk.feeRate + risk.feeCoef * price * (1 - price);
+}
 export const STARTING_CASH = 10_000;
 export const APPROVAL_MS = 35_000;
 export const DRIFT_LIMIT = 0.025;
@@ -38,7 +45,8 @@ export const DEFAULT_RISK: RiskConfig = {
   minEdge: 0.02,
   maxSpread: 0.06,
   minLiquidity: 1500,
-  feeRate: 0.007,
+  feeRate: 0,
+  feeCoef: 0.07,
   slippage: 0.004,
   freshnessMs: 45_000,
   cancelOnKill: true,
@@ -269,7 +277,7 @@ export function evaluateOpportunity(
   ordersLastHour: number,
   killed: boolean,
   circuit: string | null,
-  extra: { vol?: number | null; context?: ContextSnapshot | null; spots?: number[]; spotDtMs?: number } = {},
+  extra: { vol?: number | null; context?: ContextSnapshot | null; spots?: number[]; spotDtMs?: number; blendW?: number } = {},
 ): Opportunity {
   const blocks: string[] = [];
   if (killed) blocks.push("Kill switch is on");
@@ -293,13 +301,17 @@ export function evaluateOpportunity(
 
   const base = yesProbability(market, spot, now, extra.vol ?? null);
   const uncertainty = base.uncertainty;
-  const p = contextAdjusted(market, base.p, now, extra.context);
+  const pCtx = contextAdjusted(market, base.p, now, extra.context);
+  // never trade the raw model: pull it toward the market by the learned trust weight
+  const midForBlend = (market.yesBid + market.yesAsk) / 2;
+  const w = clamp(extra.blendW ?? 0.5, 0, 1);
+  const p = market.kind === "sim-window" ? pCtx : clamp(midForBlend + w * (pCtx - midForBlend), 0.01, 0.99);
   if (extra.context?.blockReason) blocks.push(extra.context.blockReason);
   const hair = uncertainty * risk.uncertaintyHaircut;
   const yesPx = clamp(market.yesAsk + risk.slippage, 0.01, 0.99);
   const noPx = clamp(1 - market.yesBid + risk.slippage, 0.01, 0.99);
-  const evYes = p - hair - yesPx - yesPx * risk.feeRate;
-  const evNo = 1 - p - hair - noPx - noPx * risk.feeRate;
+  const evYes = p - hair - yesPx - feePerShare(yesPx, risk);
+  const evNo = 1 - p - hair - noPx - feePerShare(noPx, risk);
   const side: Side = evYes >= evNo ? "yes" : "no";
   const executablePrice = side === "yes" ? yesPx : noPx;
   const edge = side === "yes" ? evYes : evNo;
@@ -309,18 +321,24 @@ export function evaluateOpportunity(
     blocks.push("Executable price is outside the 8¢–92¢ band");
   }
   const midYes = (market.yesBid + market.yesAsk) / 2;
-  if (market.kind !== "sim-window" && Math.abs(p - midYes) > 0.2) {
-    blocks.push(`Model (${Math.round(p * 100)}%) and market (${Math.round(midYes * 100)}%) disagree by over 20 points: treated as a data problem, not an edge`);
+  if (market.kind !== "sim-window" && Math.abs(pCtx - midYes) > 0.25) {
+    blocks.push(`Model (${Math.round(pCtx * 100)}%) and market (${Math.round(midYes * 100)}%) disagree by over 25 points: treated as a data problem, not an edge`);
+  }
+  if (market.kind !== "sim-window" && /up or down/i.test(market.question) && now - market.startAt < ENTRY_DELAY_MS) {
+    blocks.push("Too early in the window: waiting for the first 45 seconds to pass");
   }
   if (edge < risk.minEdge) {
     blocks.push(`Net edge ${edge.toFixed(3)} is below the minimum ${risk.minEdge.toFixed(3)}`);
   }
 
   const scale = clamp(extra.context?.stakeScale ?? 1, 0, 1);
-  const stake = Math.min(risk.maxStake * scale, Math.max(0, cash));
+  // size with conviction: a thin edge gets a quarter of the cap, a 10-point edge gets all of it
+  const edgeScale = clamp(edge / 0.1, 0.25, 1);
+  const stake = Math.min(risk.maxStake * scale * edgeScale, Math.max(0, cash));
   if (stake < Math.min(1, risk.maxStake)) blocks.push("Paper balance is below the minimum stake");
-  const shares = stake > 0 ? stake / (executablePrice * (1 + risk.feeRate)) : 0;
-  const debit = shares * executablePrice * (1 + risk.feeRate);
+  const unitCost = executablePrice + feePerShare(executablePrice, risk);
+  const shares = stake > 0 ? stake / unitCost : 0;
+  const debit = shares * unitCost;
   if (debit > 0 && exposure + debit > risk.maxExposure) {
     blocks.push("This stake would breach open exposure");
   }
@@ -391,7 +409,7 @@ export function runBacktest(risk: RiskConfig, seed = 20261011): BacktestReport {
       const price = clamp(quote + risk.slippage, 0.08, 0.92);
       const uncertainty = 0.045;
       const fair = 0.5;
-      const edge = fair - uncertainty * risk.uncertaintyHaircut - price - price * risk.feeRate;
+      const edge = fair - uncertainty * risk.uncertaintyHaircut - price - feePerShare(price, risk);
       const z = randn(rand);
       const won = z > 0;
       if (edge < risk.minEdge) {
@@ -399,8 +417,8 @@ export function runBacktest(risk: RiskConfig, seed = 20261011): BacktestReport {
         if (sample.length < 8) sample.push({ price, won, pnl: 0, rejected: true });
       } else {
         const stake = Math.min(risk.maxStake, equity * 0.04);
-        const shares = stake / (price * (1 + risk.feeRate));
-        const fee = shares * price * risk.feeRate;
+        const shares = stake / (price + feePerShare(price, risk));
+        const fee = shares * feePerShare(price, risk);
         const pnl = shares * (won ? 1 : 0) - shares * price - fee;
         equity += pnl;
         fees += fee;
@@ -455,7 +473,7 @@ export function runBacktest(risk: RiskConfig, seed = 20261011): BacktestReport {
     assumptions: [
       "Time-ordered synthetic 5-minute windows. The decision never sees the settlement coin-flip.",
       "Fair probability is 0.50 at the open. Quotes are noise around that fair value, so most 'edge' is false.",
-      `Costs use your current settings: fee ${(risk.feeRate * 100).toFixed(2)}% and slippage ${(risk.slippage * 100).toFixed(2)}¢, plus the uncertainty haircut.`,
+      `Costs use your current settings: Polymarket taker fee ${(feePerShare(0.5, risk) * 100).toFixed(2)}¢ per share at 50¢ and slippage ${(risk.slippage * 100).toFixed(2)}¢, plus the uncertainty haircut.`,
       "Train, validation, and test are chronological slices of one path. They are not a live track record.",
       "A pretty curve would be a bug in the story. This baseline is here to reject the idea of a promised win rate.",
     ],

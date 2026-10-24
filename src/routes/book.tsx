@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ModelVsMarketChart } from "@/components/charts";
 import { Button, Panel, Pill } from "@/components/widgets";
 import { clock, downloadText, money, pct, px, signedMoney, toCsv } from "@/lib/trading/format";
+import { STARTING_CASH } from "@/lib/trading/engine";
 import { useDesk } from "@/lib/trading/store";
 
 export const Route = createFileRoute("/book")({
@@ -24,7 +25,10 @@ function BookPage() {
   const unrealized = positions
     .filter((p) => p.status === "open")
     .reduce((sum, p) => sum + p.quantity * (p.lastMark - p.averageCost), 0);
-  const realized = positions.filter((p) => p.status === "settled").reduce((sum, p) => sum + p.realized, 0);
+  // cash-based so it stays right even though the list below shows only the latest positions
+  const marks = positions.filter((p) => p.status === "open").reduce((sum, p) => sum + p.quantity * p.lastMark, 0);
+  const totalPnl = cash + reserved + marks - STARTING_CASH;
+  const realized = totalPnl - unrealized;
 
   return (
     <div className="space-y-4">
@@ -42,9 +46,10 @@ function BookPage() {
         <Panel title="Reserved">
           <p className="font-mono text-2xl tabular-nums">{money(reserved, 0)}</p>
         </Panel>
-        <Panel title="Unrealized / realized">
+        <Panel title="Unrealized · realized since reset">
           <p className="font-mono text-2xl tabular-nums">{signedMoney(unrealized)}</p>
-          <p className="text-sm text-muted">Realized {signedMoney(realized)}</p>
+          <p className="text-sm text-muted">Realized {signedMoney(realized)} · total {signedMoney(totalPnl)}</p>
+          <p className="mt-1 text-xs text-muted">Whole paper account, practice trades included. The Trial page counts real windows only.</p>
         </Panel>
       </div>
       <div className="flex flex-wrap items-center gap-2">

@@ -108,7 +108,7 @@ function RealBacktest() {
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Windows replayed" value={String(r.marketsUsed)} hint={`${new Date(r.range.from).toLocaleDateString()} → ${new Date(r.range.to).toLocaleDateString()}`} />
-            <Stat label="Chosen min edge" value={r.chosen.minEdge.toFixed(2)} hint={`haircut ${r.chosen.uncertaintyHaircut}`} />
+            <Stat label="Chosen min edge" value={r.chosen.minEdge.toFixed(2)} hint={`haircut ${r.chosen.uncertaintyHaircut} · model weight ${r.chosen.blendW}`} />
             <Stat label="Brier: model" value={r.brier ? r.brier.model.toFixed(4) : "—"} hint="lower is better" />
             <Stat label="Brier: market" value={r.brier ? r.brier.market.toFixed(4) : "—"} hint="the bar to beat" />
           </div>
@@ -135,7 +135,7 @@ function RealBacktest() {
           {r.defaultTest && (
             <Panel title="Test slice: shipped defaults vs chosen settings">
               <p className="text-sm text-muted">
-                Defaults (edge {0.02}, haircut 0.35): {r.defaultTest.trades} trades, {signedMoney(r.defaultTest.netPnl)}. Chosen: {r.periods[2].trades} trades, {signedMoney(r.periods[2].netPnl)}.
+                Defaults (edge 0.02, haircut 0.35, weight 0.5): {r.defaultTest.trades} trades, {signedMoney(r.defaultTest.netPnl)}. Chosen: {r.periods[2].trades} trades, {signedMoney(r.periods[2].netPnl)}.
                 If the chosen settings only win because they were picked on validation, expect them to fade live.
               </p>
             </Panel>
@@ -152,11 +152,11 @@ function RealBacktest() {
           <details className="rounded-lg border border-line bg-surface p-4">
             <summary className="cursor-pointer text-sm font-semibold">Parameter sweep (train / validation)</summary>
             <table className="mt-3 w-full text-left font-mono text-xs tabular-nums">
-              <thead className="text-muted"><tr><th>edge</th><th>haircut</th><th>train n</th><th>train exp</th><th>val n</th><th>val exp</th></tr></thead>
+              <thead className="text-muted"><tr><th>edge</th><th>haircut</th><th>weight</th><th>train n</th><th>train exp</th><th>val n</th><th>val exp</th></tr></thead>
               <tbody>
                 {r.sweep.map((s, i) => (
-                  <tr key={i} className={s.params.minEdge === r.chosen.minEdge && s.params.uncertaintyHaircut === r.chosen.uncertaintyHaircut ? "text-primary" : ""}>
-                    <td>{s.params.minEdge}</td><td>{s.params.uncertaintyHaircut}</td><td>{s.train.trades}</td><td>{s.train.expectancy.toFixed(2)}</td><td>{s.validation.trades}</td><td>{s.validation.expectancy.toFixed(2)}</td>
+                  <tr key={i} className={s.params.minEdge === r.chosen.minEdge && s.params.uncertaintyHaircut === r.chosen.uncertaintyHaircut && s.params.blendW === r.chosen.blendW ? "text-primary" : ""}>
+                    <td>{s.params.minEdge}</td><td>{s.params.uncertaintyHaircut}</td><td>{s.params.blendW}</td><td>{s.train.trades}</td><td>{s.train.expectancy.toFixed(2)}</td><td>{s.validation.trades}</td><td>{s.validation.expectancy.toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>

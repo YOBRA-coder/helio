@@ -13,7 +13,10 @@ export interface RiskConfig {
   minEdge: number;
   maxSpread: number;
   minLiquidity: number;
+  /** extra flat proportional fee (usually 0) */
   feeRate: number;
+  /** Polymarket crypto taker fee: per share = feeCoef × price × (1 − price). 0.07 per current Polymarket docs. */
+  feeCoef: number;
   slippage: number;
   freshnessMs: number;
   cancelOnKill: boolean;
@@ -296,8 +299,19 @@ export interface LiveBook {
   exchangeCash: number | null;
 }
 
+export interface BlendState {
+  w: number;
+  n: number;
+  brierModel: number | null;
+  brierMarket: number | null;
+  brierBlend: number | null;
+  at: number;
+}
+
 export interface DeskCore {
   risk: RiskConfig;
+  /** learned trust in the model versus the market price */
+  blend: BlendState;
   mode: Mode;
   killed: boolean;
   cash: number;

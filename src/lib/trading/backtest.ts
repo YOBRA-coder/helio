@@ -3,13 +3,15 @@
  * information that existed at each decision time (candles strictly before it, the last market price
  * at or before it). Pure: takes a Dataset, returns a report.
  */
-import { DEFAULT_RISK, evaluateOpportunity, MODEL_VERSION, realizedVol, STARTING_CASH, yesProbability } from "./engine.ts";
+import { DEFAULT_RISK, evaluateOpportunity, feePerShare, MODEL_VERSION, realizedVol, STARTING_CASH, yesProbability } from "./engine.ts";
 import type { Dataset, HistMarket } from "./history.ts";
 import type { BacktestPeriod, BacktestTrade, EquityPoint, Market, RiskConfig } from "./types.ts";
 
 export interface Params {
   minEdge: number;
   uncertaintyHaircut: number;
+  /** trust in the model versus the market price (see blend.ts) */
+  blendW: number;
 }
 
 export interface TradeRow {
@@ -164,10 +166,10 @@ export function replay(markets: HistMarket[], ci: CandleIndex, params: Params, b
       open.push(...live);
       const exposure = open.reduce((a, o) => a + o.stake, 0);
       const lastHour = placed.filter((t) => s.t - t < 3_600_000).length;
-      const opp = evaluateOpportunity(synth(m, s, half), s.spot, s.t, risk, equity, exposure, lastHour, false, null, { vol: s.vol });
+      const opp = evaluateOpportunity(synth(m, s, half), s.spot, s.t, risk, equity, exposure, lastHour, false, null, { vol: s.vol, blendW: params.blendW });
       if (opp.hardFail) continue;
       const won = (opp.side === "yes") === m.yesWon;
-      const fee = opp.shares * opp.executablePrice * risk.feeRate;
+      const fee = opp.shares * feePerShare(opp.executablePrice, risk);
       const pnl = opp.shares * (won ? 1 : 0) - opp.shares * opp.executablePrice - fee;
       equity += pnl;
       open.push({ endAt: m.endAt, stake: opp.debit });
@@ -244,7 +246,7 @@ export function runRealBacktest(data: Dataset, opts: BtOptions = {}): RealBackte
   const test = usable.slice(cut2);
 
   const grid: Params[] = [];
-  for (const minEdge of [0.02, 0.03, 0.05, 0.08]) for (const uncertaintyHaircut of [0.35, 0.7, 1.0]) grid.push({ minEdge, uncertaintyHaircut });
+  for (const minEdge of [0.02, 0.04, 0.07]) for (const uncertaintyHaircut of [0.35, 0.7]) for (const blendW of [0.25, 0.5, 1]) grid.push({ minEdge, uncertaintyHaircut, blendW });
   const sweep: SweepRow[] = grid.map((params) => {
     const tr = replay(train, ci, params, risk, half);
     const va = replay(val, ci, params, risk, half);
@@ -257,12 +259,12 @@ export function runRealBacktest(data: Dataset, opts: BtOptions = {}): RealBackte
   });
   // choose on validation only, needing a minimum sample; otherwise keep the shipped defaults
   const eligible = sweep.filter((s) => s.validation.trades >= minSel).sort((a, b) => b.validation.expectancy - a.validation.expectancy);
-  const chosen = eligible[0]?.params ?? { minEdge: risk.minEdge, uncertaintyHaircut: risk.uncertaintyHaircut };
+  const chosen = eligible[0]?.params ?? { minEdge: risk.minEdge, uncertaintyHaircut: risk.uncertaintyHaircut, blendW: 0.5 };
 
   const trTrades = replay(train, ci, chosen, risk, half);
   const vaTrades = replay(val, ci, chosen, risk, half);
   const teTrades = replay(test, ci, chosen, risk, half);
-  const deTrades = replay(test, ci, { minEdge: risk.minEdge, uncertaintyHaircut: risk.uncertaintyHaircut }, risk, half);
+  const deTrades = replay(test, ci, { minEdge: risk.minEdge, uncertaintyHaircut: risk.uncertaintyHaircut, blendW: 0.5 }, risk, half);
   let cursor = STARTING_CASH;
   const periods: BacktestPeriod[] = [];
   for (const [name, rows, mk] of [["train", trTrades, train], ["validation", vaTrades, val], ["test", teTrades, test]] as const) {
@@ -309,7 +311,7 @@ export function runRealBacktest(data: Dataset, opts: BtOptions = {}): RealBackte
     assumptions: [
       `Replays resolved Polymarket Up/Down windows. Decisions use only candles that closed before the decision minute and the last market price at or before it.`,
       `Quotes are rebuilt from the price history as mid ± ${(half * 100).toFixed(1)}¢. Real books can be wider or thinner, so fills here are optimistic.`,
-      `Costs: fee ${(risk.feeRate * 100).toFixed(2)}%, slippage ${(risk.slippage * 100).toFixed(2)}¢, flat stake up to $${risk.maxStake}, one position per window, exposure and hourly caps respected.`,
+      `Costs: Polymarket taker fee ${(feePerShare(0.5, risk) * 100).toFixed(2)}¢ per share at 50¢, slippage ${(risk.slippage * 100).toFixed(2)}¢, flat stake up to $${risk.maxStake}, one position per window, exposure and hourly caps respected.`,
       `Parameters (minimum edge, haircut) are picked on the validation slice only; the test slice is touched once. Slices are chronological thirds of 50/25/25 percent of windows.`,
       `BTC prints are Coinbase 1-minute candles; Polymarket resolves on its own source, so edge cases can differ.`,
       `Liquidity history is not available, so windows count as liquid (at least $5k).`,

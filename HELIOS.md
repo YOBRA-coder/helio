@@ -4,7 +4,7 @@
 - **Core fixed.** `store.ts` did not compile and its trading loop reset sim markets every tick. The logic now lives in one pure ledger (`src/lib/trading/ledger.ts`) used by both the server worker and the browser fallback.
 - **Real settlement.** Paper positions on real Polymarket markets settle only when Polymarket reports a resolution (before, only sim windows ever settled).
 - **Honest fills.** Paper fills pay ask + slippage + fee; resting orders expire after 90 s; one open position per market.
-- **Model.** `helios-btc-0.4`: rolling realised volatility blended with a prior; window-open prices recovered from Coinbase candles.
+- **Model.** `helios-btc-0.5`: rolling realised volatility blended with a prior; window-open prices recovered from Coinbase candles. It never trades the raw model: it trades the market price plus a learned share (the "model trust" weight, refit from settled real trades) of the model's disagreement. Costs use Polymarket's crypto taker fee (0.07 × price × (1 − price) per share, about 1.75¢ at 50¢). Up/Down windows wait 45s after the open, and stake scales with edge (a thin edge gets a quarter of the cap).
 - **24/7 paper trial.** `npm run worker` runs the desk with no browser. State survives restarts (`data/desk.json`, `data/journal.jsonl`).
 - **Trial page.** Counts only real-market trades: P&L, profit factor, drawdown, Brier score of model vs market price, breakdowns, and a live-eligibility checklist.
 - **Live page.** Dry-run and armed modes behind env keys + owner token + passed gate + typed phrase + hard caps. The kill switch disarms it.
@@ -66,3 +66,9 @@ Included unchanged next to this folder. It is the execution toolbox (maker-rebat
 - `npm run doctor` checks which data sources this machine can reach. VPS: see DEPLOY.md.
 - Practice windows are off by default. `HELIOS_SIM_WINDOWS=1` turns them on.
 - Storage without a disk: set `HELIOS_DATABASE_URL` (Neon). See DEPLOY.md. `npm run neon:check` shows what is saved.
+
+## Reading the numbers (why pages differ)
+- Trial and Audit: every settled trade on a real Polymarket window since the last reset. Practice windows are excluded.
+- Book: the whole paper account (cash-based), practice trades and open positions included.
+- Desk "Last 24 hours": same record as Trial, rolling 24h. "Equity change today": paper account incl. open positions.
+- Reset the trial after upgrading the model or fee settings so old results do not mix with new ones.

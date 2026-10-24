@@ -1,5 +1,6 @@
 import { Button, Countdown, Panel, Pill, ProbBar } from "@/components/widgets";
 import { money, px } from "@/lib/trading/format";
+import { feePerShare } from "@/lib/trading/engine";
 import { useDesk } from "@/lib/trading/store";
 import type { Signal } from "@/lib/trading/types";
 
@@ -20,7 +21,7 @@ export function SignalCard({ signal, quiet = false }: { signal: Signal; quiet?: 
     : null;
   const outcome = signal.side === "yes" ? "Yes / Up" : "No / Down";
   const hair = signal.uncertainty * risk.uncertaintyHaircut;
-  const fee = signal.executablePrice * risk.feeRate;
+  const fee = feePerShare(signal.executablePrice, risk);
   const checkEdge = signal.probability - hair - signal.executablePrice - fee;
 
   return (
@@ -67,7 +68,7 @@ export function SignalCard({ signal, quiet = false }: { signal: Signal; quiet?: 
               <dt>Model chance this side wins</dt><dd>{signal.probability.toFixed(3)}</dd>
               <dt className="text-muted">− uncertainty haircut (±{(signal.uncertainty * 100).toFixed(1)} pts × {risk.uncertaintyHaircut})</dt><dd>−{hair.toFixed(3)}</dd>
               <dt className="text-muted">− price paid (touch + slippage)</dt><dd>−{signal.executablePrice.toFixed(3)}</dd>
-              <dt className="text-muted">− fee ({(risk.feeRate * 100).toFixed(2)}%)</dt><dd>−{fee.toFixed(3)}</dd>
+              <dt className="text-muted">− Polymarket fee</dt><dd>−{fee.toFixed(3)}</dd>
               <dt className="border-t border-line pt-1 font-semibold">Net edge</dt>
               <dd className={`border-t border-line pt-1 font-semibold ${signal.edge >= 0 ? "text-primary" : "text-danger"}`}>{signal.edge.toFixed(3)}</dd>
             </dl>

@@ -13,6 +13,7 @@ import {
   DRIFT_LIMIT,
   ensureSimMarkets,
   evaluateOpportunity,
+  feePerShare,
   MODEL_VERSION,
   parseStrikes,
   realizedVol,
@@ -20,6 +21,7 @@ import {
   STARTING_CASH,
   yesWins,
 } from "./engine.ts";
+import { defaultBlend, fitBlend } from "./blend.ts";
 import type { TapePayload } from "./tape-fetch.ts";
 import type {
   AlertItem,
@@ -117,6 +119,7 @@ export function makeCore(now = Date.now()): DeskCore {
     spotDtMs: 5000,
     tickCount: 0,
     scores: [],
+    blend: defaultBlend(),
     hist: {},
     context: null,
     trialStartedAt: now,
@@ -133,7 +136,9 @@ export function hydrateCore(raw: unknown, now = Date.now()): DeskCore {
   return {
     ...base,
     ...r,
-    risk: sanitizeRisk({ ...DEFAULT_RISK, ...(r.risk ?? {}) }),
+    // older saves used a flat percentage fee; replace it with the real Polymarket fee curve
+    risk: sanitizeRisk({ ...DEFAULT_RISK, ...(r.risk ?? {}), ...(r.risk && (r.risk as Partial<RiskConfig>).feeCoef == null ? { feeRate: 0, feeCoef: 0.07 } : {}) }),
+    blend: { ...defaultBlend(), ...(r.blend ?? {}) },
     simMarkets: [],
     liveMarkets: arr(r.liveMarkets),
     signals: arr(r.signals),
@@ -179,6 +184,7 @@ export function sanitizeRisk(risk: RiskConfig): RiskConfig {
     maxSpread: clampNum(risk.maxSpread, 0.005, 0.2),
     minLiquidity: clampNum(risk.minLiquidity, 0, 100_000),
     feeRate: clampNum(risk.feeRate, 0, 0.05),
+    feeCoef: clampNum(risk.feeCoef ?? 0.07, 0, 0.2),
     slippage: clampNum(risk.slippage, 0, 0.05),
     freshnessMs: clampNum(risk.freshnessMs, 5_000, 120_000),
     cancelOnKill: Boolean(risk.cancelOnKill),
@@ -244,7 +250,7 @@ export function applyTape(s: DeskCore, tape: TapePayload, opens: Record<string, 
     const next = liveToMarket(row, fetchedAt);
     const prev = prevById.get(next.id);
     const upDown = /up or down/i.test(next.question);
-    let openSpot = prev?.openSpot ?? opens[next.id] ?? null;
+    const openSpot = prev?.openSpot ?? opens[next.id] ?? null;
     // The window-open price must be the real print at the start (candle or our own recorded tick).
     // Using "the price when we noticed the window" gives a fake open and a fake edge, so it is never done.
     const metadataOk = next.metadataOk || (upDown && openSpot != null && !next.restricted);
@@ -438,7 +444,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
     const fillPrice = Math.min(order.limitPrice, touch + risk.slippage);
     if (order.kind !== "sim-window" && touch + risk.slippage > order.limitPrice + 0.006) return order;
     const notional = order.quantity * fillPrice;
-    const fee = notional * risk.feeRate;
+    const fee = order.quantity * feePerShare(fillPrice, risk);
     const spent = Math.min(order.debit, notional + fee);
     cash += order.debit - spent;
     fills = [
@@ -607,7 +613,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
       if (pending || recent || resting || held) continue;
       const opp = evaluateOpportunity(
         market, spot, now, risk, cash, exposureOf(positions, orders), ordersLastHour, s.killed, circuit,
-        { vol, context, spots, spotDtMs },
+        { vol, context, spots, spotDtMs, blendW: s.blend.w },
       );
       const lastSame = signals.find((sig) => sig.marketId === market.id);
       const draft = (status: Signal["status"], expiresAt: number, mode: Mode, reason: string | null): Signal => ({
@@ -706,6 +712,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
     dayStartEquity,
     peakEquity,
     tickCount,
+    blend: tickCount % 60 === 0 ? fitBlend(scores, now) : s.blend,
     curve,
     context,
   };

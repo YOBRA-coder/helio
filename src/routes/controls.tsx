@@ -87,7 +87,7 @@ function ControlsPage() {
           <Slider label="Minimum net edge" value={risk.minEdge} min={0} max={0.1} step={0.005} format={(n) => n.toFixed(3)} onChange={(minEdge) => updateRisk({ minEdge })} />
           <Slider label="Max spread" value={risk.maxSpread} min={0.01} max={0.12} step={0.005} format={(n) => `${Math.round(n * 100)}¢`} onChange={(maxSpread) => updateRisk({ maxSpread })} />
           <Slider label="Min liquidity" value={risk.minLiquidity} min={0} max={20000} step={100} format={(n) => `$${n}`} onChange={(minLiquidity) => updateRisk({ minLiquidity })} />
-          <Slider label="Fee assumption" value={risk.feeRate} min={0} max={0.03} step={0.001} format={(n) => `${(n * 100).toFixed(1)}%`} onChange={(feeRate) => updateRisk({ feeRate })} />
+          <Slider label="Polymarket taker fee (per share at 50¢)" value={risk.feeCoef} min={0} max={0.1} step={0.005} format={(n) => `${(n * 25).toFixed(2)}¢`} onChange={(feeCoef) => updateRisk({ feeCoef })} />
           <Slider label="Slippage" value={risk.slippage} min={0} max={0.03} step={0.001} format={(n) => `${(n * 100).toFixed(1)}¢`} onChange={(slippage) => updateRisk({ slippage })} />
         </div>
         <p className="mt-3 text-sm text-muted">Model {MODEL_VERSION}. Uncertainty haircut {risk.uncertaintyHaircut}. Freshness window {Math.round(risk.freshnessMs / 1000)}s.</p>
