@@ -1,13 +1,32 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { Button, Panel, ThemeSwatches } from "@/components/widgets";
-import { MODEL_VERSION } from "@/lib/trading/engine";
+import { DEFAULT_RISK, MODEL_VERSION } from "@/lib/trading/engine";
+import type { RiskConfig } from "@/lib/trading/types";
 import { useDesk } from "@/lib/trading/store";
 
 export const Route = createFileRoute("/controls")({
   head: () => ({ meta: [{ title: "Controls · Helios Desk" }] }),
   component: ControlsPage,
 });
+
+const LIMIT_KEYS = ["maxStake", "maxExposure", "dailyLossLimit", "drawdownLimit", "maxOrdersPerHour", "minEdge", "maxSpread", "minLiquidity", "feeCoef", "slippage"] as const;
+const pick = (r: RiskConfig) => Object.fromEntries(LIMIT_KEYS.map((k) => [k, r[k]])) as Partial<RiskConfig>;
+const PRESETS: Array<{ id: string; name: string; note: string; values: Partial<RiskConfig> }> = [
+  {
+    id: "cautious",
+    name: "Cautious",
+    note: "Small bets, tight loss limits, only clearer edges",
+    values: { maxStake: 10, maxExposure: 50, dailyLossLimit: 25, drawdownLimit: 100, maxOrdersPerHour: 4, minEdge: 0.03, maxSpread: 0.04, minLiquidity: 3000 },
+  },
+  { id: "default", name: "Default", note: "The recommended starting limits", values: pick(DEFAULT_RISK) },
+  {
+    id: "active",
+    name: "Active",
+    note: "Bigger bets and more trades, more risk",
+    values: { maxStake: 150, maxExposure: 800, dailyLossLimit: 400, drawdownLimit: 800, maxOrdersPerHour: 12, minEdge: 0.015, maxSpread: 0.08, minLiquidity: 1000 },
+  },
+];
 
 function ControlsPage() {
   const mode = useDesk((s) => s.mode);
@@ -16,6 +35,9 @@ function ControlsPage() {
   const setKilled = useDesk((s) => s.setKilled);
   const risk = useDesk((s) => s.risk);
   const updateRisk = useDesk((s) => s.updateRisk);
+  // limits as they were when this page opened, so one tap can undo experiments
+  const [opened] = useState(() => pick(risk));
+  const same = (v: Partial<RiskConfig>) => LIMIT_KEYS.every((k) => v[k] === undefined || Math.abs((risk[k] as number) - (v[k] as number)) < 1e-9);
   const circuitKind = useDesk((s) => s.circuitKind);
   const reconcileNote = useDesk((s) => s.reconcileNote);
   const simulateMismatch = useDesk((s) => s.simulateMismatch);
@@ -78,6 +100,23 @@ function ControlsPage() {
       </Panel>
 
       <Panel title="Risk limits">
+        <div className="mb-4 grid gap-2 sm:grid-cols-3">
+          {PRESETS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => updateRisk(p.values)}
+              className={`rounded-xl border px-3 py-2 text-left ${same(p.values) ? "border-primary text-primary" : "border-line text-muted"}`}
+            >
+              <span className="block text-sm font-semibold">{p.name}{same(p.values) ? " · active" : ""}</span>
+              <span className="block text-xs">{p.note}</span>
+            </button>
+          ))}
+        </div>
+        <div className="mb-4 flex flex-wrap gap-2">
+          <Button variant="quiet" onClick={() => updateRisk(pick(DEFAULT_RISK))} disabled={same(pick(DEFAULT_RISK))}>Reset to defaults</Button>
+          <Button variant="quiet" onClick={() => updateRisk(opened)} disabled={same(opened)}>Undo changes since opening</Button>
+        </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Slider label="Max stake" value={risk.maxStake} min={1} max={500} step={1} format={(n) => `$${n}`} onChange={(maxStake) => updateRisk({ maxStake })} />
           <Slider label="Max open exposure" value={risk.maxExposure} min={5} max={2000} step={5} format={(n) => `$${n}`} onChange={(maxExposure) => updateRisk({ maxExposure })} />

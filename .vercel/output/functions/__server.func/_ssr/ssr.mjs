@@ -160,7 +160,7 @@ var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 * the dev styles URL for route-scoped CSS collection.
 */
 async function getStartManifest(matchedRoutes) {
-	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v--6fDZW0A.mjs");
+	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-LNy3UY5m.mjs");
 	const startManifest = tsrStartManifest();
 	let routes = startManifest.routes;
 	routes[rootRouteId];
@@ -186,7 +186,7 @@ var manifest = {
 	},
 	"0a4ed536b0c588a8b85afa0871e20249ea29694ac2f7d5c61a38a1637bdd5d88": {
 		functionName: "startBacktest_createServerFn_handler",
-		importer: () => import("./desk-api-D8N-wU28.mjs")
+		importer: () => import("./desk-api-pbfhypf9.mjs")
 	},
 	"10f952f4d3b3cfd195261ae67af1a81cac02f8c25a8667d42d10266a56dbadec": {
 		functionName: "fetchTape_createServerFn_handler",
@@ -194,7 +194,7 @@ var manifest = {
 	},
 	"15fb9a660a0fe9004ede28c6ff5e02b10a3131697575818ec627dca8eb1cec9f": {
 		functionName: "exportBackup_createServerFn_handler",
-		importer: () => import("./desk-api-D8N-wU28.mjs")
+		importer: () => import("./desk-api-pbfhypf9.mjs")
 	},
 	"41996e041589bf38c6cace7d166f1e72718dcb5e3bb5f2e11322c833bd6dad24": {
 		functionName: "getMe_createServerFn_handler",
@@ -202,7 +202,7 @@ var manifest = {
 	},
 	"52f44871d324c9407981df9887db23f09a353d9b121e1b72cb505c1e57c71fa0": {
 		functionName: "getVersion_createServerFn_handler",
-		importer: () => import("./desk-api-D8N-wU28.mjs")
+		importer: () => import("./desk-api-pbfhypf9.mjs")
 	},
 	"66e192131d4f2484dbb79ed78ab4c47ec3b3947e0043798a9dd0ce445e32ab16": {
 		functionName: "fetchResolutionsFn_createServerFn_handler",
@@ -210,7 +210,7 @@ var manifest = {
 	},
 	"6bb9d1d4288c61ed75c3223be2cc1284ccfe42ce64bb99900f82a8f3f0753ab2": {
 		functionName: "getDesk_createServerFn_handler",
-		importer: () => import("./desk-api-D8N-wU28.mjs")
+		importer: () => import("./desk-api-pbfhypf9.mjs")
 	},
 	"7803d5d212e09a58b9287ee117cf0791595efd16e86ac99d6839baef979bc881": {
 		functionName: "deleteAccount_createServerFn_handler",
@@ -230,15 +230,15 @@ var manifest = {
 	},
 	"c3bda05130ec6e4413d1b076cd60de02b28c4b2d4e5f5b8def5c9213f2a12328": {
 		functionName: "restoreBackup_createServerFn_handler",
-		importer: () => import("./desk-api-D8N-wU28.mjs")
+		importer: () => import("./desk-api-pbfhypf9.mjs")
 	},
 	"db2bced928ad16e7f468f541f598bbf85a4cdb145ff97544b7b3e3d62f285dcc": {
 		functionName: "getBacktest_createServerFn_handler",
-		importer: () => import("./desk-api-D8N-wU28.mjs")
+		importer: () => import("./desk-api-pbfhypf9.mjs")
 	},
 	"f185d0f9cc4eb0882491ec32077ad50057606be82c2f21c2a6f808ab846c85d0": {
 		functionName: "sendCommand_createServerFn_handler",
-		importer: () => import("./desk-api-D8N-wU28.mjs")
+		importer: () => import("./desk-api-pbfhypf9.mjs")
 	},
 	"f6f7aadbe2bca34250f9c39f8535ea0ba5313ff85d9dbc8cb5cf686e0dfe13f0": {
 		functionName: "testConnection_createServerFn_handler",
@@ -1651,7 +1651,7 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
 	const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-		import("./router-D_0PflgJ.mjs").then((n) => n.t),
+		import("./router-e2V2EpZR.mjs").then((n) => n.t),
 		import("./start-5Z2QO8AU.mjs"),
 		import("./empty-plugin-adapters-D9UWiqvJ.mjs")
 	]);
