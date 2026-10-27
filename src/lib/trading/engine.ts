@@ -26,6 +26,8 @@ export function momentumProbability(baseP: number, spots: number[], spot: number
 
 export const MODEL_VERSION = "helios-btc-0.5";
 /** Up/Down windows: wait this long after the open before trading (the open print and early noise dominate). */
+export const MAX_BELIEVABLE_EDGE = 0.08;
+export const ENTRY_FRACTION = 0.3;
 export const ENTRY_DELAY_MS = 45_000;
 
 /** Taker fee per share at a given price. Polymarket's crypto fee peaks at 50¢ (about 1.75¢ per share) and shrinks toward the edges. */
@@ -277,7 +279,7 @@ export function evaluateOpportunity(
   ordersLastHour: number,
   killed: boolean,
   circuit: string | null,
-  extra: { vol?: number | null; context?: ContextSnapshot | null; spots?: number[]; spotDtMs?: number; blendW?: number } = {},
+  extra: { vol?: number | null; context?: ContextSnapshot | null; spots?: number[]; spotDtMs?: number; blendW?: number; coolOff?: string | null } = {},
 ): Opportunity {
   const blocks: string[] = [];
   if (killed) blocks.push("Kill switch is on");
@@ -317,24 +319,38 @@ export function evaluateOpportunity(
   const edge = side === "yes" ? evYes : evNo;
   const modelForSide = side === "yes" ? p : 1 - p;
 
-  if (executablePrice < 0.08 || executablePrice > 0.92) {
-    blocks.push("Executable price is outside the 8¢–92¢ band");
-  }
+  const real = market.kind !== "sim-window";
+  if (real && extra.coolOff) blocks.push(extra.coolOff);
   const midYes = (market.yesBid + market.yesAsk) / 2;
   if (market.kind !== "sim-window" && Math.abs(pCtx - midYes) > 0.25) {
     blocks.push(`Model (${Math.round(pCtx * 100)}%) and market (${Math.round(midYes * 100)}%) disagree by over 25 points: treated as a data problem, not an edge`);
   }
-  if (market.kind !== "sim-window" && /up or down/i.test(market.question) && now - market.startAt < ENTRY_DELAY_MS) {
-    blocks.push("Too early in the window: waiting for the first 45 seconds to pass");
+  if (real && edge > MAX_BELIEVABLE_EDGE) {
+    blocks.push(`Net edge ${edge.toFixed(3)} is above ${MAX_BELIEVABLE_EDGE}: against an efficient market that is more likely a model error than a real edge`);
+  }
+  if (real && /up or down/i.test(market.question)) {
+    const len = market.endAt - market.startAt;
+    const wait = Math.max(ENTRY_DELAY_MS, len * ENTRY_FRACTION);
+    if (now - market.startAt < wait) {
+      blocks.push(`Too early in the window: waiting ${Math.round(wait / 1000)}s so the price has moved enough to say something`);
+    }
   }
   if (edge < risk.minEdge) {
     blocks.push(`Net edge ${edge.toFixed(3)} is below the minimum ${risk.minEdge.toFixed(3)}`);
   }
 
+  // Real results: buying cheap longshots lost money (the market was right far more often than the model), so real markets use a tighter band.
+  const lo = real ? 0.22 : 0.08;
+  const hi = real ? 0.88 : 0.92;
+  if (executablePrice < lo || executablePrice > hi) {
+    blocks.push(`Executable price is outside the ${Math.round(lo * 100)}¢–${Math.round(hi * 100)}¢ band`);
+  }
   const scale = clamp(extra.context?.stakeScale ?? 1, 0, 1);
   // size with conviction: a thin edge gets a quarter of the cap, a 10-point edge gets all of it
-  const edgeScale = clamp(edge / 0.1, 0.25, 1);
-  const stake = Math.min(risk.maxStake * scale * edgeScale, Math.max(0, cash));
+  const edgeScale = clamp(edge / 0.06, 0.25, 1);
+  // bet less while the model has not proven itself: full size only once its learned trust is high
+  const trustScale = real ? clamp(0.3 + w, 0.3, 1) : 1;
+  const stake = Math.min(risk.maxStake * scale * edgeScale * trustScale, Math.max(0, cash));
   if (stake < Math.min(1, risk.maxStake)) blocks.push("Paper balance is below the minimum stake");
   const unitCost = executablePrice + feePerShare(executablePrice, risk);
   const shares = stake > 0 ? stake / unitCost : 0;

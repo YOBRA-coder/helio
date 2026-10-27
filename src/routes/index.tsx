@@ -175,42 +175,34 @@ function DeskHome() {
           )}
         </Panel>
       </div>
-{/* 1. Added grid-cols-1 for mobile, adapting smoothly up to lg displays */}
-<div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-  
-  {/* 2. Scaled the Chart container to fill full mobile width seamlessly */}
-  <Panel title="Equity and drawdown" className="w-full lg:col-span-3">
-    <EquityDrawdownChart data={curve} />
-  </Panel>
-  
-  {/* 3. Scaled the Open Positions container to full mobile width */}
-  <Panel title="Open positions" className="w-full lg:col-span-2">
-    <ul className="space-y-2 text-sm">
-      {positions
-        .filter((p) => p.status === "open")
-        .slice(0, 8)
-        .map((p) => {
-          const pnl = p.quantity * (p.lastMark - p.averageCost) - p.fees;
-          return (
-            <li key={p.id} className="rounded-md bg-raised px-3 py-2">
-              {/* 4. CHANGED 'truncate' to 'line-clamp-2 break-words' so long crypto questions map neatly on mobile */}
-              <p className="line-clamp-2 break-words font-medium">{p.question}</p>
-              
-              {/* 5. ADDED 'flex-wrap' to prevent numeric parameters from squishing or clipping on narrow viewports */}
-              <p className="mt-1 flex flex-wrap items-center justify-between gap-2 font-mono text-xs tabular-nums text-muted">
-                <span className="break-all">{p.side.toUpperCase()} {p.quantity.toFixed(1)} @ {p.averageCost.toFixed(2)} → {p.lastMark.toFixed(2)}</span>
-                <span className={pnl >= 0 ? "text-primary" : "text-danger"}>{signedMoney(pnl)}</span>
-              </p>
-              <button type="button" onClick={() => flatten(p.id)} className="mt-1 h-9 text-xs font-semibold text-primary">Flatten at the touch</button>
-            </li>
-          );
-        })}
-      {positions.filter((p) => p.status === "open").length === 0 && <li className="text-muted">No open positions.</li>}
-    </ul>
-    {scores && <p className="mt-3 text-xs text-muted">Record on real markets: {scores.wins}W / {scores.losses}L · net {signedMoney(scores.netPnl)} · <Link to="/trial" className="underline">full trial</Link></p>}
-  </Panel>
-</div>
 
+      <div className="grid gap-4 lg:grid-cols-5">
+        <Panel title="Equity and drawdown" className="lg:col-span-3">
+          <EquityDrawdownChart data={curve} />
+        </Panel>
+        <Panel title="Open positions" className="lg:col-span-2">
+          <ul className="space-y-2 text-sm">
+            {positions
+              .filter((p) => p.status === "open")
+              .slice(0, 8)
+              .map((p) => {
+                const pnl = p.quantity * (p.lastMark - p.averageCost) - p.fees;
+                return (
+                  <li key={p.id} className="rounded-md bg-raised px-3 py-2">
+                    <p className="truncate">{p.question}</p>
+                    <p className="mt-1 flex items-center justify-between gap-2 font-mono text-xs tabular-nums text-muted">
+                      <span>{p.side.toUpperCase()} {p.quantity.toFixed(1)} @ {p.averageCost.toFixed(2)} → {p.lastMark.toFixed(2)}</span>
+                      <span className={pnl >= 0 ? "text-primary" : "text-danger"}>{signedMoney(pnl)}</span>
+                    </p>
+                    <button type="button" onClick={() => flatten(p.id)} className="mt-1 h-9 text-xs font-semibold text-primary">Flatten at the touch</button>
+                  </li>
+                );
+              })}
+            {positions.filter((p) => p.status === "open").length === 0 && <li className="text-muted">No open positions.</li>}
+          </ul>
+          {scores && <p className="mt-3 text-xs text-muted">Record on real markets: {scores.wins}W / {scores.losses}L · net {signedMoney(scores.netPnl)} · <Link to="/trial" className="underline">full trial</Link></p>}
+        </Panel>
+      </div>
 
       <Panel
         title="Live Polymarket"

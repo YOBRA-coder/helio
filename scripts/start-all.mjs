@@ -50,3 +50,13 @@ function shutdown(code) {
 }
 process.on("SIGTERM", () => shutdown(0));
 process.on("SIGINT", () => shutdown(0));
+
+// Render's free web service goes to sleep after 15 minutes without inbound traffic, which also freezes the worker.
+// Calling our own public address every 9 minutes counts as traffic and keeps both awake.
+const publicUrl = env.RENDER_EXTERNAL_URL || env.HELIOS_PUBLIC_URL;
+if (publicUrl && env.HELIOS_KEEPALIVE !== "0") {
+  console.log(`[start-all] keep-awake ping on ${publicUrl} every 9 minutes`);
+  setInterval(() => {
+    fetch(publicUrl, { signal: AbortSignal.timeout(20_000) }).catch((err) => console.error(`[start-all] keep-awake ping failed: ${err instanceof Error ? err.message : err}`));
+  }, 9 * 60_000);
+}

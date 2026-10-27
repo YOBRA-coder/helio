@@ -602,6 +602,12 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
     // Orders that expired or were cancelled without a fill never held risk, so they do not use up the hourly cap.
     const ordersLastHour = orders.filter((o) => now - o.submittedAt < 3_600_000 && (o.status === "open" || o.status === "filled")).length;
     const vol = realizedVol(spots, spotDtMs);
+    // loss-streak breaker: 4 real losses in a row pauses real-market entries for an hour
+    const lastReal = scores.filter((r) => r.official && r.venue === "paper" && r.kind !== "sim-window").slice(0, 4);
+    const coolOff =
+      lastReal.length === 4 && lastReal.every((r) => r.pnl < 0) && now - lastReal[0].settledAt < 3_600_000
+        ? "Cooling off for an hour after 4 losing trades in a row"
+        : null;
     let created = 0;
     for (const market of book) {
       if (created >= 2) break;
@@ -613,7 +619,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
       if (pending || recent || resting || held) continue;
       const opp = evaluateOpportunity(
         market, spot, now, risk, cash, exposureOf(positions, orders), ordersLastHour, s.killed, circuit,
-        { vol, context, spots, spotDtMs, blendW: s.blend.w },
+        { vol, context, spots, spotDtMs, blendW: s.blend.w, coolOff },
       );
       const lastSame = signals.find((sig) => sig.marketId === market.id);
       const draft = (status: Signal["status"], expiresAt: number, mode: Mode, reason: string | null): Signal => ({

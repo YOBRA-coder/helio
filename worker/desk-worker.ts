@@ -16,12 +16,30 @@ console.log(`[helios-worker] master key: ${hasMasterKey(env) ? "set (user secret
 console.log(`[helios-worker] live trading globally ${env.HELIOS_LIVE_ENABLED === "1" ? "ENABLED" : "disabled"}`);
 
 let stopping = false;
+let lastOk = Date.now();
+// Watchdog: if a step hangs (a stuck network call, a database stall) the worker exits, and the launcher restarts the container.
+const STALL_MS = 120_000;
+setInterval(() => {
+  if (!stopping && Date.now() - lastOk > STALL_MS) {
+    console.error(`[helios-worker] no completed step for ${Math.round((Date.now() - lastOk) / 1000)}s: exiting so the host restarts it`);
+    process.exit(1);
+  }
+}, 15_000);
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`step timed out after ${ms}ms`)), ms);
+    p.then((v) => (clearTimeout(t), resolve(v)), (e) => (clearTimeout(t), reject(e)));
+  });
+}
+
 async function loop() {
   let last = 0;
   while (!stopping) {
     const t0 = Date.now();
     try {
-      await hub.step();
+      await withTimeout(hub.step(), 45_000);
+      lastOk = Date.now();
       if (t0 - last > 60_000) {
         last = t0;
         console.log(`[helios-worker] ${hub.size} desk(s) running`);

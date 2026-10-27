@@ -479,3 +479,11 @@ test("blend weight is learned from settled trades: 0 when the model adds nothing
   assert.ok(fitBlend(good, T0).w > 0.7);
   assert.equal(fitBlend(good.slice(0, 10), T0).w, 0.5);
 });
+
+test("real markets: longshot band, believable-edge cap and loss-streak cool-off", async () => {
+  const { evaluateOpportunity, DEFAULT_RISK } = await import("./engine.ts");
+  const m = { ...applyTape(makeCore(T0), tape(T0, 0.15), { "poly-m1": 100_000 }, T0).liveMarkets[0] };
+  const o = evaluateOpportunity({ ...m, updatedAt: T0 + 200_000, endAt: T0 + 900_000, startAt: T0 - 400_000 }, 100_000, T0 + 200_000, DEFAULT_RISK, 10_000, 0, 0, false, null, { blendW: 0.5, coolOff: "Cooling off for an hour after 4 losing trades in a row" });
+  assert.ok(o.hardFail);
+  assert.ok(/Cooling off|band|disagree/.test(o.hardFail ?? ""));
+});
