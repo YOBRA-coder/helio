@@ -24,7 +24,7 @@ export function momentumProbability(baseP: number, spots: number[], spot: number
   return clamp(baseP + clamp(move / sigma, -2, 2) * 0.02, 0.04, 0.96);
 }
 
-export const MODEL_VERSION = "helios-btc-0.5";
+export const MODEL_VERSION = "helios-btc-0.6";
 /** Up/Down windows: wait this long after the open before trading (the open print and early noise dominate). */
 export const MAX_BELIEVABLE_EDGE = 0.08;
 export const ENTRY_FRACTION = 0.3;
@@ -144,7 +144,7 @@ export function realizedVol(spots: number[], dtMs: number): number | null {
   return clamp(0.5 * annual + 0.5 * PRIOR_ANNUAL_VOL, 0.25, 1.6);
 }
 
-export function yesProbability(market: Market, spot: number, now: number, annualVol: number | null = null) {
+export function legacyYesProbability(market: Market, spot: number, now: number, annualVol: number | null = null) {
   const hours = Math.max(0, market.endAt - now) / 3_600_000;
   const volPerSqrtHour = (annualVol ?? PRIOR_ANNUAL_VOL) / Math.sqrt(365.25 * 24);
   const sigma = Math.max(volPerSqrtHour * Math.sqrt(Math.max(hours, 0.05)) * spot, spot * 0.0008);
@@ -162,6 +162,72 @@ export function yesProbability(market: Market, spot: number, now: number, annual
   const p = clamp(normalCdf(zHi) - normalCdf(zLo), 0.005, 0.995);
   const uncertainty = clamp(0.04 + 0.06 * Math.exp(-hours / 8), 0.035, 0.16);
   return { p, uncertainty, sigma };
+}
+
+/**
+ * "Closer" model (helios-btc-0.6) for real Up/Down windows.
+ *
+ * Question it answers: given where BTC is now versus the window-open print, and how long is left, how likely is it
+ * that BTC finishes above the open? It is a plain random-walk model with honest error bars:
+ *   - sigma over the time left comes from realised vol (annualised), widened by FAT_TAIL for jumps;
+ *   - plus the staleness of our last print (we poll every few seconds, so the true price has moved since);
+ *   - plus a basis term, because Polymarket settles on its own price source, not on Coinbase.
+ * The 0.5-version of this model floored the time left at 3 minutes and shrank z by 10%, which made it far less
+ * confident than the market late in a window. Because the desk then bought whichever side the market priced as the
+ * underdog, it kept buying longshots. Those two shortcuts are removed here.
+ */
+export const FAT_TAIL = 1.15;
+/** Extra vol multiplier used for the conservative probability that actually decides a trade. */
+export const VOL_DOUBT = 1.2;
+export const BASIS_BP = 2;
+const SEC_PER_YEAR = 365.25 * 24 * 3600;
+
+export interface CloserRead {
+  /** model P(finish above the open) */
+  p: number;
+  /** same, with vol inflated by VOL_DOUBT: what trades are judged on */
+  pCons: number;
+  z: number;
+  /** 1-sd move expected over the time left, in dollars */
+  sigma: number;
+  secLeft: number;
+}
+
+/** `staleMs` = how old the BTC print is. The real price has moved since; the model widens its error bars for it. */
+export function closerRead(openSpot: number, spot: number, endAt: number, now: number, annualVol: number | null, staleMs: number): CloserRead {
+  const secLeft = Math.max(0, (endAt - now) / 1000);
+  const perSec = (annualVol ?? PRIOR_ANNUAL_VOL) / Math.sqrt(SEC_PER_YEAR);
+  const stale = Math.max(500, staleMs) / 1000;
+  const basis = (BASIS_BP / 10_000) * Math.SQRT2;
+  const varFrac = (perSec * FAT_TAIL) ** 2 * (secLeft + stale) + basis ** 2;
+  const sigma = Math.sqrt(varFrac) * spot;
+  const z = sigma > 0 ? (spot - openSpot) / sigma : 0;
+  const p = clamp(normalCdf(z), 0.005, 0.995);
+  const zc = z / VOL_DOUBT;
+  const pCons = clamp(normalCdf(zc), 0.005, 0.995);
+  return { p, pCons, z, sigma, secLeft };
+}
+
+/** Where in the window the closer strategy is allowed to act: the last stretch, once the outcome is largely decided. */
+export const CLOSER = {
+  /** zone = last 40% of the window, never shorter than 60s and never longer than 20 minutes */
+  zoneFraction: 0.4,
+  zoneMinMs: 60_000,
+  zoneMaxMs: 20 * 60_000,
+  minZ: 1.0,
+  minEdge: 0.02,
+  priceLo: 0.55,
+  priceHi: 0.97,
+  maxEdge: 0.15,
+};
+
+export function yesProbability(market: Market, spot: number, now: number, annualVol: number | null = null, staleMs = 6000) {
+  const isUpDown = /up or down/i.test(market.question);
+  if (market.kind !== "sim-window" && isUpDown && market.openSpot) {
+    const r = closerRead(market.openSpot, spot, market.endAt, now, annualVol, staleMs);
+    return { p: r.p, uncertainty: clamp(Math.abs(r.p - r.pCons) + 0.01, 0.01, 0.2), sigma: r.sigma };
+  }
+  return legacyYesProbability(market, spot, now, annualVol);
 }
 
 /** Max probability shift context may apply, and only on markets with at least 4h to run. */
@@ -269,7 +335,7 @@ export function stepSimQuote(market: Market, spot: number, now: number, rand: ()
   };
 }
 
-export function evaluateOpportunity(
+export function evaluateLegacy(
   market: Market,
   spot: number,
   now: number,
@@ -279,7 +345,7 @@ export function evaluateOpportunity(
   ordersLastHour: number,
   killed: boolean,
   circuit: string | null,
-  extra: { vol?: number | null; context?: ContextSnapshot | null; spots?: number[]; spotDtMs?: number; blendW?: number; coolOff?: string | null } = {},
+  extra: EvalExtra = {},
 ): Opportunity {
   const blocks: string[] = [];
   if (killed) blocks.push("Kill switch is on");
@@ -301,7 +367,7 @@ export function evaluateOpportunity(
   if (ordersLastHour >= risk.maxOrdersPerHour) blocks.push("Order count for this hour is at the cap");
   if (exposure >= risk.maxExposure) blocks.push("Open exposure is at the cap");
 
-  const base = yesProbability(market, spot, now, extra.vol ?? null);
+  const base = legacyYesProbability(market, spot, now, extra.vol ?? null);
   const uncertainty = base.uncertainty;
   const pCtx = contextAdjusted(market, base.p, now, extra.context);
   // never trade the raw model: pull it toward the market by the learned trust weight
@@ -380,6 +446,157 @@ export function evaluateOpportunity(
     pYesAlt: momentumProbability(base.p, extra.spots ?? [], spot, extra.vol ?? null, extra.spotDtMs ?? 6000),
     marketMid: (market.yesBid + market.yesAsk) / 2,
     uncertainty,
+    side,
+    executablePrice,
+    stake,
+    shares,
+    debit,
+    expectedValue: edge,
+    edge,
+    rationale,
+    risks,
+    hardFail: blocks[0] ?? null,
+  };
+}
+
+export interface EvalExtra {
+  vol?: number | null;
+  context?: ContextSnapshot | null;
+  spots?: number[];
+  /** seconds between the samples in `spots` (the volatility cadence) */
+  spotDtMs?: number;
+  /** age of the BTC print being traded on; defaults to spotDtMs */
+  staleMs?: number;
+  blendW?: number;
+  coolOff?: string | null;
+  /** "closer" (default, helios-btc-0.6) or "legacy" (helios-btc-0.5, kept for comparison in the strategy lab) */
+  strategy?: "legacy" | "closer";
+}
+
+/**
+ * Entry point used by the desk. Real Up/Down windows go to the closer strategy. Practice windows and any other
+ * contract keep the original logic, because the closer model is only defined for "finish above the open" markets.
+ */
+export function evaluateOpportunity(
+  market: Market,
+  spot: number,
+  now: number,
+  risk: RiskConfig,
+  cash: number,
+  exposure: number,
+  ordersLastHour: number,
+  killed: boolean,
+  circuit: string | null,
+  extra: EvalExtra = {},
+): Opportunity {
+  const closer = extra.strategy !== "legacy" && market.kind !== "sim-window" && /up or down/i.test(market.question);
+  return closer
+    ? evaluateCloser(market, spot, now, risk, cash, exposure, ordersLastHour, killed, circuit, extra)
+    : evaluateLegacy(market, spot, now, risk, cash, exposure, ordersLastHour, killed, circuit, extra);
+}
+
+/**
+ * helios-btc-0.6: trade only the last stretch of a window, only the side the model says is clearly ahead,
+ * only when that beats the market's price by more than every cost. Otherwise do nothing.
+ */
+export function evaluateCloser(
+  market: Market,
+  spot: number,
+  now: number,
+  risk: RiskConfig,
+  cash: number,
+  exposure: number,
+  ordersLastHour: number,
+  killed: boolean,
+  circuit: string | null,
+  extra: EvalExtra = {},
+): Opportunity {
+  const blocks: string[] = [];
+  if (killed) blocks.push("Kill switch is on");
+  if (circuit) blocks.push(circuit);
+  if (!market.metadataOk) {
+    blocks.push(market.openSpot == null ? "Waiting for the window-open BTC price (Coinbase candle not loaded yet)" : "Resolution metadata is missing or ambiguous");
+  }
+  if (market.restricted) blocks.push("Eligibility cannot be verified");
+  if (market.status !== "open") blocks.push("Market is not open");
+  if (now - market.updatedAt > risk.freshnessMs) blocks.push("Market data is stale");
+  if (market.endAt - now < 20_000) blocks.push("Inside the no-trade buffer before expiry");
+  const spread = market.yesAsk - market.yesBid;
+  if (spread > risk.maxSpread) blocks.push("Spread is wider than the limit");
+  if (market.liquidity < risk.minLiquidity) blocks.push("Liquidity is below the floor");
+  if (ordersLastHour >= risk.maxOrdersPerHour) blocks.push("Order count for this hour is at the cap");
+  if (exposure >= risk.maxExposure) blocks.push("Open exposure is at the cap");
+  if (extra.context?.blockReason) blocks.push(extra.context.blockReason);
+  if (extra.coolOff) blocks.push(extra.coolOff);
+
+  const mid = (market.yesBid + market.yesAsk) / 2;
+  const read = market.openSpot
+    ? closerRead(market.openSpot, spot, market.endAt, now, extra.vol ?? null, extra.staleMs ?? extra.spotDtMs ?? 6000)
+    : { p: 0.5, pCons: 0.5, z: 0, sigma: 0, secLeft: Math.max(0, (market.endAt - now) / 1000) };
+  // judge on the conservative probability, then pull toward the market by the learned trust weight
+  const w = clamp(extra.blendW ?? 0.5, 0, 1);
+  const p = clamp(mid + w * (read.pCons - mid), 0.01, 0.99);
+  const yesPx = clamp(market.yesAsk + risk.slippage, 0.01, 0.99);
+  const noPx = clamp(1 - market.yesBid + risk.slippage, 0.01, 0.99);
+  const evYes = p - yesPx - feePerShare(yesPx, risk);
+  const evNo = 1 - p - noPx - feePerShare(noPx, risk);
+  // the side is the one the model says is ahead, never the market's underdog
+  const side: Side = read.z >= 0 ? "yes" : "no";
+  const executablePrice = side === "yes" ? yesPx : noPx;
+  const edge = side === "yes" ? evYes : evNo;
+  const modelForSide = side === "yes" ? p : 1 - p;
+  const unitCost = executablePrice + feePerShare(executablePrice, risk);
+
+  if (Math.abs(read.p - mid) > 0.25) {
+    blocks.push(`Model (${Math.round(read.p * 100)}%) and market (${Math.round(mid * 100)}%) disagree by over 25 points: treated as a data problem, not an edge`);
+  }
+  const len = market.endAt - market.startAt;
+  const zone = clamp(len * CLOSER.zoneFraction, CLOSER.zoneMinMs, CLOSER.zoneMaxMs);
+  const left = market.endAt - now;
+  if (left > zone) {
+    blocks.push(`Too early: this strategy only acts in the last ${Math.round(zone / 1000)}s of a window, when the outcome is largely decided`);
+  }
+  if (Math.abs(read.z) < CLOSER.minZ) {
+    blocks.push(`Not decided yet: BTC is ${Math.abs(read.z).toFixed(2)} standard deviations from the open, and this strategy needs ${CLOSER.minZ.toFixed(1)}`);
+  }
+  const needEdge = Math.max(risk.minEdge, CLOSER.minEdge);
+  if (edge > CLOSER.maxEdge) {
+    blocks.push(`Net edge ${edge.toFixed(3)} is above ${CLOSER.maxEdge}: more likely a data problem than a real edge`);
+  }
+  if (edge < needEdge) blocks.push(`Net edge ${edge.toFixed(3)} is below the minimum ${needEdge.toFixed(3)}`);
+  if (executablePrice < CLOSER.priceLo || executablePrice > CLOSER.priceHi) {
+    blocks.push(`Executable price is outside the ${Math.round(CLOSER.priceLo * 100)}¢–${Math.round(CLOSER.priceHi * 100)}¢ band (favourites only)`);
+  }
+
+  const scale = clamp(extra.context?.stakeScale ?? 1, 0, 1);
+  const edgeScale = clamp(edge / 0.06, 0.25, 1);
+  const trustScale = clamp(0.3 + w, 0.3, 1);
+  const stake = Math.min(risk.maxStake * scale * edgeScale * trustScale, Math.max(0, cash));
+  if (stake < Math.min(1, risk.maxStake)) blocks.push("Paper balance is below the minimum stake");
+  const shares = stake > 0 ? stake / unitCost : 0;
+  const debit = shares * unitCost;
+  if (debit > 0 && exposure + debit > risk.maxExposure) blocks.push("This stake would breach open exposure");
+
+  const outcome = side === "yes" ? market.outcomes[0] : market.outcomes[1];
+  const dollars = Math.abs(spot - (market.openSpot ?? spot));
+  const rationale = [
+    `${Math.round(read.secLeft)}s left. BTC is $${dollars.toFixed(0)} ${spot >= (market.openSpot ?? spot) ? "above" : "below"} the open, ${Math.abs(read.z).toFixed(2)} standard deviations (1 sd = $${read.sigma.toFixed(0)} over the time left).`,
+    `${MODEL_VERSION} puts ${outcome} at ${(modelForSide * 100).toFixed(1)}% after widening for fat tails and trusting it ${Math.round(w * 100)}% against the market (market mid ${(side === "yes" ? mid : 1 - mid).toFixed(2)}).`,
+    `Buying ${outcome} at ${Math.round(executablePrice * 1000) / 10}¢ after slippage. Fee and slippage leave net edge ${edge.toFixed(3)} per share.`,
+  ];
+  const risks = [
+    `A loss costs the whole stake (about ${Math.round(executablePrice * 100)}¢ per share) against a ${Math.round((1 - executablePrice) * 100)}¢ gain. Win rate must stay above ${(unitCost * 100).toFixed(0)}% to profit.`,
+    "A late jump in BTC, or a difference between Coinbase and Polymarket's price source at the close, can flip a decided window.",
+    `Spread ${(spread * 100).toFixed(1)}¢ · liquidity ${Math.round(market.liquidity).toLocaleString("en-US")}.`,
+  ];
+
+  return {
+    probability: modelForSide,
+    yesProbability: p,
+    pYesBase: read.p,
+    pYesAlt: momentumProbability(read.p, extra.spots ?? [], spot, extra.vol ?? null, extra.spotDtMs ?? 6000),
+    marketMid: mid,
+    uncertainty: clamp(Math.abs(read.p - read.pCons) + 0.01, 0.01, 0.2),
     side,
     executablePrice,
     stake,

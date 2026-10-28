@@ -258,7 +258,7 @@ import { fetchDataset, parseCandles, parsePriceHistory, parseResolvedEvent, type
 import { runRealBacktest } from "./backtest.ts";
 import { mulberry32, yesProbability } from "./engine.ts";
 
-function synthDataset(n: number, efficient: boolean): Dataset {
+function synthDataset(n: number, efficient: boolean | "sluggish"): Dataset {
   const rand = mulberry32(7);
   const T = 1_800_000_000_000;
   const candles: Dataset["candles"] = [];
@@ -282,7 +282,13 @@ function synthDataset(n: number, efficient: boolean): Dataset {
     for (let m = 0; m <= 6; m += 1) {
       const ts = (s - 60_000 + m * 60_000) / 1000;
       let mid = 0.5;
-      if (efficient && m >= 1) {
+      if (efficient === "sluggish" && m >= 1) {
+        // a crowd that only prices in about half of what BTC has already done
+        const spotNow = candles[Math.min(openIdx + m - 2, closeIdx)][4];
+        const mk = { kind: "live", question: "Up or Down", openSpot: candles[openIdx][1], endAt: e, startAt: s, strikeLow: null, strikeHigh: null } as unknown as Market;
+        const pm = yesProbability(mk, spotNow, s + (m - 1) * 60_000).p;
+        mid = Math.min(0.97, Math.max(0.03, 0.5 + 0.5 * (pm - 0.5) + (rand() - 0.5) * 0.02));
+      } else if (efficient === true && m >= 1) {
         // an efficient market prices the same information the model sees, plus a little noise
         const spotNow = candles[Math.min(openIdx + m - 2, closeIdx)][4];
         const mk = { kind: "live", question: "Up or Down", openSpot: candles[openIdx][1], endAt: e, startAt: s, strikeLow: null, strikeHigh: null } as unknown as Market;
@@ -306,8 +312,8 @@ test("real backtest runs chronologically, produces three slices and a verdict", 
   assert.ok(r.periods[2].netPnl < 150, `suspiciously profitable vs an efficient market: ${r.periods[2].netPnl}`);
 });
 
-test("against a market that ignores BTC, the replay does find the (real) edge", () => {
-  const r = runRealBacktest(synthDataset(400, false));
+test("against a sluggish market that only half-prices BTC's move, the replay does find the (real) edge", () => {
+  const r = runRealBacktest(synthDataset(400, "sluggish"));
   assert.ok(r.periods[2].trades > 20 && r.periods[2].netPnl > 0, `expected positive, got ${r.periods[2].netPnl}`);
   assert.ok(r.brier && r.brier.model < r.brier.market);
 });

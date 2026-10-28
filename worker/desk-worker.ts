@@ -42,7 +42,8 @@ async function loop() {
       lastOk = Date.now();
       if (t0 - last > 60_000) {
         last = t0;
-        console.log(`[helios-worker] ${hub.size} desk(s) running`);
+        const f = hub.feed?.status();
+        console.log(`[helios-worker] ${hub.size} desk(s) running · BTC feed: ${f ? `${f.state} (${f.detail}; ${f.ticks} ticks, ${f.reconnects} reconnects)` : "off (HELIOS_WS_FEED=0)"}`);
       }
     } catch (err) {
       console.error("[helios-worker] hub step failed:", err instanceof Error ? err.message : err);

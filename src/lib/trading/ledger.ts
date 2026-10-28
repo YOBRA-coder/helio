@@ -619,7 +619,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
       if (pending || recent || resting || held) continue;
       const opp = evaluateOpportunity(
         market, spot, now, risk, cash, exposureOf(positions, orders), ordersLastHour, s.killed, circuit,
-        { vol, context, spots, spotDtMs, blendW: s.blend.w, coolOff },
+        { vol, context, spots, spotDtMs, staleMs: ctx.spotAgeMs, blendW: s.blend.w, coolOff },
       );
       const lastSame = signals.find((sig) => sig.marketId === market.id);
       const draft = (status: Signal["status"], expiresAt: number, mode: Mode, reason: string | null): Signal => ({

@@ -166,7 +166,7 @@ export function replay(markets: HistMarket[], ci: CandleIndex, params: Params, b
       open.push(...live);
       const exposure = open.reduce((a, o) => a + o.stake, 0);
       const lastHour = placed.filter((t) => s.t - t < 3_600_000).length;
-      const opp = evaluateOpportunity(synth(m, s, half), s.spot, s.t, risk, equity, exposure, lastHour, false, null, { vol: s.vol, blendW: params.blendW });
+      const opp = evaluateOpportunity(synth(m, s, half), s.spot, s.t, risk, equity, exposure, lastHour, false, null, { vol: s.vol, blendW: params.blendW, spotDtMs: 60_000 });
       if (opp.hardFail) continue;
       const won = (opp.side === "yes") === m.yesWon;
       const fee = opp.shares * feePerShare(opp.executablePrice, risk);
@@ -223,7 +223,7 @@ function brierAt(markets: HistMarket[], ci: CandleIndex, vol = true) {
     const snaps = snapshots(m, ci);
     if (!snaps.length) continue;
     const s = snaps[Math.floor(snaps.length / 2)];
-    const p = yesProbability(synth(m, s, 0.01), s.spot, s.t, vol ? s.vol : null).p;
+    const p = yesProbability(synth(m, s, 0.01), s.spot, s.t, vol ? s.vol : null, 60_000).p;
     const y = m.yesWon ? 1 : 0;
     bm += (p - y) ** 2;
     bk += (s.mid - y) ** 2;

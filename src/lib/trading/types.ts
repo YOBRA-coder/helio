@@ -349,6 +349,8 @@ export interface TickCtx {
   /** true when `spot` is a new print since the last tick (keeps the vol sample honest). */
   spotFresh?: boolean;
   spotDtMs?: number;
+  /** how old `spot` is right now (ms). Live websocket prints are ~0-1s; the REST price can be up to ~6s. */
+  spotAgeMs?: number;
   /** gammaId -> YES won (true/false), only for markets the venue says are resolved. */
   resolutions?: Record<string, boolean>;
   context?: ContextSnapshot | null;

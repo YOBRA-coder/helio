@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { AccountStore, type UserSecrets } from "../accounts/store.ts";
 import { appendJournal, backupSnapshot, drainCommands, readSnapshot, takeRestore, writeSnapshot } from "./desk-io.ts";
 import { loadContext } from "./context.ts";
+import { SpotFeed } from "./feed.ts";
 import { loadSdk } from "./live.ts";
 import { DeskRunner, WORKER_VERSION } from "./runner.ts";
 import { fetchQuotes, fetchResolutions, fetchSpotAt, loadTape } from "./tape-fetch.ts";
@@ -61,11 +62,14 @@ export class Hub {
   private store: AccountStore;
   private env: Record<string, string | undefined>;
   private shared;
+  /** one live BTC websocket shared by every desk; optional (HELIOS_WS_FEED=0 turns it off) */
+  readonly feed: SpotFeed | null;
 
   constructor(store: AccountStore, env: Record<string, string | undefined> = process.env, now: () => number = Date.now) {
     this.store = store;
     this.env = env;
     this.now = now;
+    this.feed = env.HELIOS_WS_FEED === "0" ? null : new SpotFeed({ now });
     this.shared = {
       loadTape: cached(5_500, loadTape, now),
       fetchQuotes: cached(2_000, fetchQuotes, now, (ids: string[]) => [...ids].sort().join(",")),
@@ -116,6 +120,7 @@ export class Hub {
         fetchQuotes: this.shared.fetchQuotes,
         fetchResolutions: this.shared.fetchResolutions,
         fetchSpotAt: this.shared.fetchSpotAt,
+        liveSpot: () => this.feed?.latest() ?? null,
         loadContext: () => this.context(t()),
         getSdk: () => loadSdk(Hub.sdkEnv(this.env, t())),
         liveEnv: () => ({
@@ -162,6 +167,7 @@ export class Hub {
 
   async step() {
     const now = this.now();
+    this.feed?.start(); // idempotent
     if (now - this.lastScan > 5_000) {
       this.lastScan = now;
       const ids = await this.store.listUserIds();
@@ -188,6 +194,7 @@ export class Hub {
 
   /** Final snapshot with heartbeat 0 so the UI shows "offline" immediately. */
   async shutdown() {
+    this.feed?.stop();
     for (const t of this.tenants.values()) {
       const dir = this.store.userDir(t.id);
       await writeSnapshot(dir, {

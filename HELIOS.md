@@ -67,6 +67,14 @@ Included unchanged next to this folder. It is the execution toolbox (maker-rebat
 - Practice windows are off by default. `HELIOS_SIM_WINDOWS=1` turns them on.
 - Storage without a disk: set `HELIOS_DATABASE_URL` (Neon). See DEPLOY.md. `npm run neon:check` shows what is saved.
 
+## Strategy upgrade: helios-btc-0.6 "closer" (read STRATEGY.md)
+- Why 0.5 lost: it was under-confident late in a window and bought whichever side the market priced as the underdog (win rate ~30% at ~30c, below break-even after fees).
+- 0.6 trades only the last 40% of a window, only the side that is clearly ahead (>= 1.0 sd from the open), only at 55c-97c, only with >= 2c net edge.
+- `npm run lab:strategy` compares old and new in a synthetic world and sweeps how slow the crowd is. It is a logic check, not proof of a real edge.
+- **Press Reset trial after deploying**, so 0.5's results do not mix with 0.6.
+- Live BTC websocket feed (HELIOS_WS_FEED=1, falls back to REST automatically): see STRATEGY.md section 9. Check the worker log says `BTC feed: live`.
+- Expect fewer trades (single digits to low teens a day on 5m) with a high win rate and small wins/large losses.
+
 ## Reading the numbers (why pages differ)
 - Trial and Audit: every settled trade on a real Polymarket window since the last reset. Practice windows are excluded.
 - Book: the whole paper account (cash-based), practice trades and open positions included.

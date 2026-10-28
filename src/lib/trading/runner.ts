@@ -33,6 +33,8 @@ export interface RunnerDeps {
   fetchQuotes: (tokenIds: string[]) => Promise<Array<{ tokenId: string; bid: number; ask: number }>>;
   fetchResolutions: (gammaIds: string[]) => Promise<Record<string, boolean>>;
   fetchSpotAt: (ts: number) => Promise<number | null>;
+  /** optional live websocket price; when present and fresh it replaces the 6-second REST print */
+  liveSpot?: () => { price: number; at: number } | null;
   loadContext: () => Promise<ContextSnapshot>;
   getSdk: () => Promise<ClobSdk>;
   liveEnv: () => LiveEnv;
@@ -58,6 +60,10 @@ export class DeskRunner {
   private opens = new Map<string, number>();
   private openTried = new Map<string, number>();
   private spotLog: Array<[number, number]> = [];
+  /** when the REST price in core.spot arrived, and when we last logged / sampled a live print */
+  private restSpotAt = 0;
+  private wsLoggedAt = 0;
+  private wsSampledAt = 0;
   private openFails = 0;
   private lastTape = 0;
   private lastQuotes = 0;
@@ -177,7 +183,8 @@ export class DeskRunner {
         this.meta.feedError = tape.error;
         if (tape.spot) {
           this.pendingSpot = { spot: tape.spot, source: tape.spotSource };
-          this.spotLog = [...this.spotLog, [t, tape.spot] as [number, number]].filter((r) => t - r[0] < 6 * 3_600_000).slice(-4000);
+          this.restSpotAt = t;
+          this.spotLog = [...this.spotLog, [t, tape.spot] as [number, number]].filter((r) => t - r[0] < 6 * 3_600_000).slice(-6000);
         }
         // recover window-open prints for Up/Down markets we joined mid-window
         for (const m of this.core.liveMarkets) {
@@ -287,14 +294,36 @@ export class DeskRunner {
     const cmds = await d.drainCommands();
     for (const cmd of cmds) await this.apply(cmd);
 
-    // tick
-    const fresh = this.pendingSpot;
+    // tick. A live websocket print (under 3s old) is the price we trade on; the REST print is the fallback.
+    const wsPrint = d.liveSpot?.() ?? null;
+    const wsAge = wsPrint ? now - wsPrint.at : Infinity;
+    const useWs = Boolean(wsPrint) && wsAge < 3_000 && (wsPrint?.price ?? 0) > 0;
+    let fresh = this.pendingSpot;
     this.pendingSpot = null;
+    let spotFresh = Boolean(fresh);
+    let spot = fresh?.spot ?? this.core.spot;
+    let spotSource = fresh?.source;
+    let spotAgeMs = Math.max(0, now - this.restSpotAt) + 800;
+    if (useWs && wsPrint) {
+      spot = wsPrint.price;
+      spotSource = "Coinbase websocket BTC-USD";
+      spotAgeMs = wsAge + 200;
+      // the volatility sample keeps its 6-second cadence so the vol estimate means the same thing as before
+      spotFresh = now - this.wsSampledAt >= 6_000;
+      if (spotFresh) this.wsSampledAt = now;
+      fresh = null;
+      // keep a record of window-open prices at 5s resolution
+      if (now - this.wsLoggedAt >= 5_000) {
+        this.wsLoggedAt = now;
+        this.spotLog = [...this.spotLog, [now, wsPrint.price] as [number, number]].filter((r) => now - r[0] < 6 * 3_600_000).slice(-6000);
+      }
+    }
     this.core = tickCore(this.core, {
       now,
-      spot: fresh?.spot ?? this.core.spot,
-      spotSource: fresh?.source,
-      spotFresh: Boolean(fresh),
+      spot,
+      spotSource,
+      spotFresh,
+      spotAgeMs,
       spotDtMs: 6_000,
       resolutions: this.resolutions,
       sim: process.env.HELIOS_SIM_WINDOWS === "1",
