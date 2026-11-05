@@ -71,9 +71,9 @@ export function defaultLiveBook(): LiveBook {
     status: "off",
     armedAt: null,
     auto: false,
-    maxStake: 5,
-    maxExposure: 25,
-    dailyLossLimit: 10,
+    maxStake: 10,
+    maxExposure: 50,
+    dailyLossLimit: 20,
     orders: [],
     realized: 0,
     dayKey: "",
@@ -157,6 +157,85 @@ export function hydrateCore(raw: unknown, now = Date.now()): DeskCore {
   };
 }
 
+/** Loss-streak breaker: 4 real-market losses in a row pause real-market entries for an hour. Returns the reason, or null. */
+export function coolOffReason(scores: ScoreRow[], now: number): string | null {
+  const lastReal = scores.filter((r) => r.official && r.venue === "paper" && r.kind !== "sim-window").slice(0, 4);
+  return lastReal.length === 4 && lastReal.every((r) => r.pnl < 0) && now - lastReal[0].settledAt < 3_600_000
+    ? "Cooling off for an hour after 4 losing trades in a row"
+    : null;
+}
+
+export interface LimitRow {
+  key: string;
+  label: string;
+  used: number;
+  cap: number;
+  /** "$" or "" */
+  unit: string;
+  /** what happens at the cap, and when it frees up */
+  note: string;
+  hit: boolean;
+}
+
+/**
+ * How close the desk is to each limit right now. Powers the "why is nothing trading" panel on Controls.
+ * Mirrors the gates the evaluators and circuit breakers actually use.
+ */
+export function limitUsage(s: Pick<DeskCore, "risk" | "orders" | "positions" | "cash" | "dayStartEquity" | "peakEquity" | "scores" | "killed" | "circuitKind">, now: number): { rows: LimitRow[]; stops: string[] } {
+  const { risk } = s;
+  const hourOrders = s.orders.filter((o) => now - o.submittedAt < 3_600_000 && (o.status === "open" || o.status === "filled"));
+  const oldest = hourOrders.reduce((m, o) => Math.min(m, o.submittedAt), Infinity);
+  const equity = equityOf(s.cash, s.positions, s.orders);
+  const exposure = exposureOf(s.positions, s.orders);
+  const dayLoss = Math.max(0, s.dayStartEquity - equity);
+  const drawdown = Math.max(0, Math.max(s.peakEquity, equity) - equity);
+  const free = Number.isFinite(oldest) ? Math.max(1, Math.ceil((oldest + 3_600_000 - now) / 60_000)) : 0;
+  const rows: LimitRow[] = [
+    {
+      key: "orders",
+      label: "Orders in the last hour",
+      used: hourOrders.length,
+      cap: risk.maxOrdersPerHour,
+      unit: "",
+      note: hourOrders.length >= risk.maxOrdersPerHour ? `At the cap. The next slot frees in about ${free} min (it is a rolling hour, not a clock hour).` : "Rolling hour. Cancelled and expired orders do not count.",
+      hit: hourOrders.length >= risk.maxOrdersPerHour,
+    },
+    {
+      key: "exposure",
+      label: "Open exposure",
+      used: exposure,
+      cap: risk.maxExposure,
+      unit: "$",
+      note: exposure >= risk.maxExposure ? "At the cap. Frees as open windows settle." : `Room for about ${Math.floor(Math.max(0, risk.maxExposure - exposure) / Math.max(1, risk.minStake))} more minimum-size bets.`,
+      hit: exposure >= risk.maxExposure,
+    },
+    {
+      key: "daily",
+      label: "Loss today (UTC day)",
+      used: dayLoss,
+      cap: risk.dailyLossLimit,
+      unit: "$",
+      note: dayLoss >= risk.dailyLossLimit ? "Daily loss limit hit: new orders stay paused until 00:00 UTC, or until you raise the limit." : "Pauses all new orders for the day if reached.",
+      hit: dayLoss >= risk.dailyLossLimit,
+    },
+    {
+      key: "drawdown",
+      label: "Drop from peak equity",
+      used: drawdown,
+      cap: risk.drawdownLimit,
+      unit: "$",
+      note: drawdown >= risk.drawdownLimit ? "Drawdown breaker on: orders stay paused until equity recovers above the line or you raise the limit." : "Pauses all new orders if equity falls this far from its high.",
+      hit: drawdown >= risk.drawdownLimit,
+    },
+  ];
+  const stops: string[] = [];
+  if (s.killed) stops.push("Emergency stop is on (Controls > Kill switch).");
+  if (s.circuitKind === "reconcile") stops.push("Reconciliation mismatch is holding orders. Press Mark reconciled.");
+  const cool = coolOffReason(s.scores, now);
+  if (cool) stops.push(`${cool}. It lifts one hour after the last loss.`);
+  return { rows, stops };
+}
+
 export function exposureOf(positions: Position[], orders: Order[]) {
   const pos = positions.filter((p) => p.status === "open").reduce((sum, p) => sum + p.quantity * p.averageCost, 0);
   const reserved = orders.filter((o) => o.status === "open").reduce((sum, o) => sum + o.debit, 0);
@@ -174,8 +253,11 @@ export function findMarket(s: Pick<DeskCore, "simMarkets" | "liveMarkets">, id: 
 }
 
 export function sanitizeRisk(risk: RiskConfig): RiskConfig {
+  const maxStake = clampNum(risk.maxStake, 5, 1000);
   return {
-    maxStake: clampNum(risk.maxStake, 1, 1000),
+    maxStake,
+    // older saves have no minStake: fall back to the default, and never let it exceed the max stake
+    minStake: clampNum(risk.minStake ?? DEFAULT_RISK.minStake, 5, maxStake),
     maxExposure: clampNum(risk.maxExposure, 5, 5000),
     dailyLossLimit: clampNum(risk.dailyLossLimit, 2, 2000),
     drawdownLimit: clampNum(risk.drawdownLimit, 50, 3000),
@@ -603,11 +685,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
     const ordersLastHour = orders.filter((o) => now - o.submittedAt < 3_600_000 && (o.status === "open" || o.status === "filled")).length;
     const vol = realizedVol(spots, spotDtMs);
     // loss-streak breaker: 4 real losses in a row pauses real-market entries for an hour
-    const lastReal = scores.filter((r) => r.official && r.venue === "paper" && r.kind !== "sim-window").slice(0, 4);
-    const coolOff =
-      lastReal.length === 4 && lastReal.every((r) => r.pnl < 0) && now - lastReal[0].settledAt < 3_600_000
-        ? "Cooling off for an hour after 4 losing trades in a row"
-        : null;
+    const coolOff = coolOffReason(scores, now);
     let created = 0;
     for (const market of book) {
       if (created >= 2) break;

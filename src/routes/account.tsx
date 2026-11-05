@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button, Panel, Pill } from "@/components/widgets";
 import {
-  deleteAccount, getMe, getSettings, saveSettings, signOutFn, testConnection,
+  changePasswordFn, deleteAccount, getMe, getSettings, saveSettings, signOutFn, testConnection,
   type Me, type SettingsInput, type SettingsView,
 } from "@/lib/trading/auth-api";
 import { exportBackup, restoreBackup } from "@/lib/trading/desk-api";
@@ -27,6 +27,7 @@ function AccountPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [delPw, setDelPw] = useState("");
+  const [pw, setPw] = useState({ cur: "", next: "", again: "" });
   const pwa = useInstall();
 
   const load = async () => {
@@ -191,6 +192,25 @@ function AccountPage() {
               setMsg(r.ok ? "Backup sent. The worker applies it within a few seconds." : (r.error ?? "Could not restore."));
             }} />
           </label>
+        </div>
+      </Panel>
+
+      <Panel title="Change password">
+        <p className="mb-3 text-sm text-muted">10+ characters. Your other signed-in devices are signed out when you change it.</p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <input type="password" autoComplete="current-password" value={pw.cur} onChange={(e) => setPw({ ...pw, cur: e.target.value })} placeholder="Current password" className={input} />
+          <input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} placeholder="New password" className={input} />
+          <input type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} placeholder="New password again" className={input} />
+        </div>
+        <div className="mt-3">
+          <Button type="button" disabled={busy || !pw.cur || !pw.next} onClick={async () => {
+            if (pw.next !== pw.again) { setMsg("The two new passwords do not match."); return; }
+            setBusy(true);
+            const r = await changePasswordFn({ data: { current: pw.cur, next: pw.next } }).catch(() => ({ ok: false, error: "Server did not answer." }));
+            setMsg(r.ok ? "Password changed." : (r.error ?? "Could not change the password."));
+            if (r.ok) setPw({ cur: "", next: "", again: "" });
+            setBusy(false);
+          }}>Change password</Button>
         </div>
       </Panel>
 

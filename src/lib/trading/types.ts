@@ -5,7 +5,10 @@ export type Mode = "manual" | "auto";
 export type CircuitKind = "daily" | "drawdown" | "reconcile" | null;
 
 export interface RiskConfig {
+  /** Biggest single bet. Actual size is scaled down for thin edges, but never below `minStake`. */
   maxStake: number;
+  /** Smallest single bet. Polymarket needs at least 5 shares per order, so $5 is the practical floor. */
+  minStake: number;
   maxExposure: number;
   dailyLossLimit: number;
   drawdownLimit: number;

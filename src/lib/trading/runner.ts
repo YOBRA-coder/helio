@@ -454,14 +454,14 @@ export class DeskRunner {
       }
       case "liveUpdate": {
         const live = this.core.live;
-        const clamp = (v: number | undefined, cur: number, ceil: number) => (v == null || !Number.isFinite(v) ? cur : Math.min(ceil, Math.max(1, v)));
+        const clamp = (v: number | undefined, cur: number, ceil: number, floor = 1) => (v == null || !Number.isFinite(v) ? cur : Math.min(ceil, Math.max(floor, v)));
         this.core = {
           ...this.core,
           live: {
             ...live,
             auto: cmd.auto == null ? live.auto : live.status === "off" ? false : cmd.auto,
-            maxStake: clamp(cmd.maxStake, live.maxStake, LIVE_CEILING.maxStake),
-            maxExposure: clamp(cmd.maxExposure, live.maxExposure, LIVE_CEILING.maxExposure),
+            maxStake: clamp(cmd.maxStake, live.maxStake, LIVE_CEILING.maxStake, 5),
+            maxExposure: clamp(cmd.maxExposure, live.maxExposure, LIVE_CEILING.maxExposure, 5),
             dailyLossLimit: clamp(cmd.dailyLossLimit, live.dailyLossLimit, LIVE_CEILING.dailyLossLimit),
           },
           audit: withAudit(this.core.audit, { id: uid("audit"), at: now, actor: "owner", action: "Live limits updated", detail: "Caps are clamped to hard ceilings." }),

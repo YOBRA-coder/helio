@@ -78,7 +78,16 @@ function LoginPage() {
           </Button>
         </form>
         {me && !me.signupOpen && <p className="mt-3 text-sm text-muted">Sign-up is closed on this server. Ask the operator for an account.</p>}
-        <p className="mt-3 text-xs text-muted">Passwords are hashed with scrypt and never stored in clear. There is no password reset by email: the operator can delete an account so you can re-register.</p>
+        <details className="mt-3 text-sm">
+          <summary className="cursor-pointer text-muted">Forgot your password?</summary>
+          <div className="mt-2 space-y-2 text-muted">
+            <p>There is no reset email (the desk has no mail service), so the person running the server resets it. On the server, run:</p>
+            <pre className="overflow-x-auto rounded-md bg-raised px-3 py-2 font-mono text-xs">npm run reset-password -- you@example.com</pre>
+            <p>With Docker: <span className="font-mono text-xs">docker compose exec web npm run reset-password -- you@example.com</span>. It prints a new password and signs you out everywhere. Sign in, then change it under Account.</p>
+            <p>On a host with no shell (Render and similar): set <span className="font-mono text-xs">HELIOS_RESET_EMAIL</span> and <span className="font-mono text-xs">HELIOS_RESET_PASSWORD</span> (10+ characters) in the service environment and redeploy. Remove both afterwards.</p>
+          </div>
+        </details>
+        <p className="mt-3 text-xs text-muted">Passwords are hashed with scrypt and never stored in clear.</p>
       </Panel>
       <p className="text-sm text-muted">Not ready? The desk also runs a paper-only browser version without an account; it stops when you close the tab.</p>
     </div>

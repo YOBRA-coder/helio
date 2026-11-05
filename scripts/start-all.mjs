@@ -3,7 +3,7 @@
  * Starts the web server and the desk worker side by side. If either dies the container exits,
  * so the platform restarts both together.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { databaseUrl, restore, startSync } from "./neon-sync.mjs";
 
 const env = { ...process.env, HELIOS_DATA_DIR: process.env.HELIOS_DATA_DIR || "/data" };
@@ -19,6 +19,12 @@ if (dbUrl) {
   sync = startSync(env.HELIOS_DATA_DIR, dbUrl, { slowEveryMs: Math.max(1, Number(env.HELIOS_CHECKPOINT_MIN) || 15) * 60_000 });
 } else {
   console.log("[start-all] no database URL set: data lives only in HELIOS_DATA_DIR (needs a persistent disk)");
+}
+
+// One-shot password reset for hosts with no shell: set HELIOS_RESET_EMAIL and HELIOS_RESET_PASSWORD, redeploy, then remove them.
+if (env.HELIOS_RESET_EMAIL && env.HELIOS_RESET_PASSWORD) {
+  const r = spawnSync("node", ["--experimental-strip-types", "--no-warnings", "scripts/reset-password.ts", env.HELIOS_RESET_EMAIL, env.HELIOS_RESET_PASSWORD], { env, stdio: "inherit" });
+  console.log(`[start-all] password reset ${r.status === 0 ? "done" : "FAILED"} for ${env.HELIOS_RESET_EMAIL}. Remove HELIOS_RESET_EMAIL and HELIOS_RESET_PASSWORD from the environment now.`);
 }
 
 const procs = [

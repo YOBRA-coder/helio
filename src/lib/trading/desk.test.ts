@@ -424,16 +424,49 @@ test("live orders fail closed when the location is blocked or unknown", async ()
   assert.equal(unknown.status, "rejected");
 });
 
-test("max stake can be set as low as $1 and trades size to it", () => {
+test("max stake can be set as low as $5 and trades size to it", () => {
   let s = applyTape(makeCore(T0), tape(T0, 0.3), { "poly-m1": 100_000 }, T0);
-  s = applyCommand(s, { type: "updateRisk", risk: { ...s.risk, maxStake: 1, minEdge: 0 } } as never, T0);
-  assert.equal(s.risk.maxStake, 1);
+  s = applyCommand(s, { type: "updateRisk", risk: { ...s.risk, maxStake: 5, minStake: 5, minEdge: 0 } } as never, T0);
+  assert.equal(s.risk.maxStake, 5);
   s = { ...s, mode: "auto" };
   for (let i = 1; i <= 40; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_000, spotFresh: true, spotDtMs: 1000, sim: false });
   const placed = s.signals.filter((x) => x.status === "executed");
-  for (const x of placed) assert.ok(x.stake <= 1.0001);
+  for (const x of placed) assert.ok(x.stake <= 5.0001);
   const tooSmall = applyCommand(s, { type: "updateRisk", risk: { ...s.risk, maxStake: 0.2 } } as never, T0);
-  assert.equal(tooSmall.risk.maxStake, 1);
+  assert.equal(tooSmall.risk.maxStake, 5);
+});
+
+test("min stake never exceeds max stake, and older saves without it get the default", async () => {
+  const { sanitizeRisk, hydrateCore } = await import("./ledger.ts");
+  const { DEFAULT_RISK } = await import("./engine.ts");
+  assert.equal(sanitizeRisk({ ...DEFAULT_RISK, maxStake: 10, minStake: 50 }).minStake, 10);
+  assert.equal(sanitizeRisk({ ...DEFAULT_RISK, minStake: 1 }).minStake, 5);
+  const old = { ...DEFAULT_RISK } as Record<string, unknown>;
+  delete old.minStake;
+  assert.equal(hydrateCore({ ...makeCore(T0), risk: old }, T0).risk.minStake, DEFAULT_RISK.minStake);
+});
+
+test("sizeStake: conviction scales the bet but never below the min, above the max, the cash, or the exposure room", async () => {
+  const { sizeStake } = await import("./engine.ts");
+  const r = { maxStake: 30, minStake: 5, maxExposure: 150 };
+  assert.equal(sizeStake(r, 1, 1, 1, 1000, 0), 30);
+  assert.equal(sizeStake(r, 1, 0.25, 0.3, 1000, 0), 5, "thin edge + low trust floors at the min");
+  assert.equal(sizeStake(r, 1, 1, 1, 1000, 140), 10, "only $10 of room left under the cap");
+  assert.equal(sizeStake(r, 1, 1, 1, 3, 0), 3, "cash is the last limit");
+  assert.equal(sizeStake(r, 0, 1, 1, 1000, 0), 0, "context scale 0 means no bet");
+});
+
+test("limitUsage reports the rolling hourly cap, exposure, and when a slot frees", async () => {
+  const { limitUsage } = await import("./ledger.ts");
+  const base = makeCore(T0);
+  const mk = (i: number, at: number) => ({ id: `o${i}`, idempotencyKey: `k${i}`, marketId: "m", signalId: "s", mode: "auto", venue: "paper", side: "yes", limitPrice: 0.6, quantity: 10, debit: 6, status: "filled", submittedAt: at, updatedAt: at, question: "q", kind: "live" }) as never;
+  const orders = Array.from({ length: base.risk.maxOrdersPerHour }, (_, i) => mk(i, T0 - 30 * 60_000 + i));
+  const u = limitUsage({ ...base, orders }, T0);
+  const row = u.rows.find((r) => r.key === "orders")!;
+  assert.equal(row.hit, true);
+  assert.match(row.note, /about 30 min/);
+  assert.equal(limitUsage({ ...base, orders }, T0 + 31 * 60_000).rows.find((r) => r.key === "orders")!.hit, false);
+  assert.equal(limitUsage({ ...base, killed: true }, T0).stops.length, 1);
 });
 
 test("a window noticed mid-way never takes the current price as its open", () => {

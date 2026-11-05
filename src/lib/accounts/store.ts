@@ -112,6 +112,52 @@ export class AccountStore {
     return { token, user };
   }
 
+  /** Signed-in user changes their own password. Every other session is signed out; `keepToken` stays signed in. */
+  async changePassword(userId: string, current: string, next: string, keepToken?: string | null): Promise<{ ok: boolean; error?: string }> {
+    if (next.length < 10) return { ok: false, error: "Use at least 10 characters for the new password." };
+    if (next.length > 200) return { ok: false, error: "Password is too long." };
+    const user = (await this.users()).find((u) => u.id === userId);
+    if (!user) return { ok: false, error: "Sign in first." };
+    const key = `pw|${userId}`;
+    const f = this.fails.get(key);
+    if (f && f.n >= 5 && Date.now() < f.until) return { ok: false, error: "Too many attempts. Try again in a few minutes." };
+    if (!(await verifyPassword(current, user.hash))) {
+      const n = (f && Date.now() < f.until ? f.n : 0) + 1;
+      this.fails.set(key, { n, until: Date.now() + 15 * 60_000 });
+      return { ok: false, error: "Your current password is wrong." };
+    }
+    this.fails.delete(key);
+    await this.writePassword(userId, next, keepToken ?? null);
+    return { ok: true };
+  }
+
+  /**
+   * Operator reset (no old password needed): used by `npm run reset-password` and the one-shot boot reset.
+   * Signs the account out everywhere. Returns false when no account has that email.
+   */
+  async resetPasswordByEmail(emailRaw: string, next: string): Promise<{ ok: boolean; error?: string }> {
+    const email = emailRaw.trim().toLowerCase();
+    if (next.length < 10) return { ok: false, error: "Use at least 10 characters for the new password." };
+    if (next.length > 200) return { ok: false, error: "Password is too long." };
+    const user = (await this.users()).find((u) => u.email === email);
+    if (!user) return { ok: false, error: `No account with the email ${email}.` };
+    await this.writePassword(user.id, next, null);
+    this.fails.clear();
+    return { ok: true };
+  }
+
+  private async writePassword(userId: string, password: string, keepToken: string | null) {
+    const hash = await hashPassword(password);
+    await locked(async () => {
+      const users = (await this.users()).map((u) => (u.id === userId ? { ...u, hash } : u));
+      await writeAtomic(join(this.root, "users.json"), JSON.stringify(users));
+      const sessions = await this.sessions();
+      const keep = keepToken ? sha256(keepToken) : null;
+      for (const k of Object.keys(sessions)) if (sessions[k].userId === userId && k !== keep) delete sessions[k];
+      await this.saveSessions(sessions);
+    });
+  }
+
   private async sessions(): Promise<Record<string, { userId: string; exp: number }>> {
     const s = await readJson<Record<string, { userId: string; exp: number }>>(join(this.root, "sessions.json"), {});
     const now = Date.now();

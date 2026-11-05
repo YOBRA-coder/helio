@@ -112,11 +112,11 @@ function LivePage() {
       <Panel title="Caps">
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="text-sm">
-            <span className="mb-1 block text-muted">Max per order ($, ≤ {LIVE_CEILING.maxStake})</span>
+            <span className="mb-1 block text-muted">Max per order ($5 to {LIVE_CEILING.maxStake})</span>
             <input value={stake} onChange={(e) => setStake(e.target.value)} placeholder={String(live.maxStake)} inputMode="decimal" className="h-11 w-full rounded-md border border-line bg-raised px-3 font-mono" />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-muted">Max open exposure ($, ≤ {LIVE_CEILING.maxExposure})</span>
+            <span className="mb-1 block text-muted">Max open exposure ($5 to {LIVE_CEILING.maxExposure})</span>
             <input value={expo} onChange={(e) => setExpo(e.target.value)} placeholder={String(live.maxExposure)} inputMode="decimal" className="h-11 w-full rounded-md border border-line bg-raised px-3 font-mono" />
           </label>
           <label className="text-sm">

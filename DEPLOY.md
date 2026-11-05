@@ -118,3 +118,25 @@ These hosts run one process per service, so the Docker image's default command (
 4. **Use an always-on paid instance.** Free instances go to sleep after about 15 minutes without visitors, which also stops the worker, so a "week-long" paper trial would not run.
 5. Do not run a separate "background worker" service: services cannot share a disk, so the worker would never see your desk. The single container is correct.
 6. Open `https://<your-service>.onrender.com`, sign up, then check the Desk page: the "worker has not started" banner should clear within about 10 seconds.
+
+
+## Moving from Render to a VPS
+Why bother: a Render free instance sleeps, restarts, and (without a disk or Neon) forgets everything, so the desk stops, then resumes, and the trial record can reset. A VPS runs the web app and the worker 24/7 with the data on its own disk.
+
+1. **Save what you have first.** On the old site open Account > Download backup (your paper desk and limits). Keep your `HELIOS_MASTER_KEY`; you need the same value on the VPS to read saved keys.
+2. **Set up the VPS** with Option A above (Docker) and fill `.env` with the same `HELIOS_MASTER_KEY`.
+3. **Bring your data across**, pick one:
+   - *You used Neon on Render:* put the same `HELIOS_DATABASE_URL` in `.env`, run `docker compose run --rm web node scripts/neon-restore.mjs` (plain Node: `npm run neon:restore`), then `docker compose up -d`. Accounts, passwords, saved keys and the desk come across. Remove the database URL afterwards so two copies are not syncing.
+   - *You used a Render Disk:* copy the files from `/data` into the `helios-data` volume (Render shell: `tar czf - /data`, then unpack on the VPS).
+   - *Neither / the data is gone:* sign up again on the VPS, then Account > Restore from file with the backup from step 1.
+4. **Point your domain** at the VPS (Caddy gets the HTTPS certificate on its own), then turn the Render service off so only one desk is trading.
+5. **Check it:** `docker compose logs -f worker` shows the desk loop, and the top bar of the app shows the worker alive. `docker compose exec web npm run doctor` shows whether Polymarket is reachable from the server's region.
+
+## Locked out? Reset a password
+- Docker: `docker compose exec web npm run reset-password -- you@example.com` (prints a new password; add a second argument to choose your own).
+- Plain Node: `npm run reset-password -- you@example.com`.
+- Host with no shell (Render): set `HELIOS_RESET_EMAIL` and `HELIOS_RESET_PASSWORD` (10+ characters) in the service environment and redeploy; remove both afterwards.
+The account is signed out everywhere. Saved keys and the desk are untouched. Once signed in, change it under Account > Change password.
+
+## Limits: what stops trades
+Controls shows each limit's live usage and what blocks a signal. The two that most often cause "trades, then a pause": orders per hour (a rolling 60 minutes) and open exposure. Small bets leave room for many more concurrent trades under the same exposure. Presets: Small bets (more trades), Balanced (default), Big bets (fewer trades). Existing accounts keep their saved limits until you pick a preset.

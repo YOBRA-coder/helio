@@ -30,6 +30,17 @@ export const MAX_BELIEVABLE_EDGE = 0.08;
 export const ENTRY_FRACTION = 0.3;
 export const ENTRY_DELAY_MS = 45_000;
 
+/**
+ * Bet size. `maxStake` is a ceiling, not the usual bet: conviction (edge) and the learned model trust scale it down,
+ * but never below `minStake`, and never above the cash left or the room left under the open-exposure cap.
+ */
+export function sizeStake(risk: Pick<RiskConfig, "maxStake" | "minStake" | "maxExposure">, scale: number, edgeScale: number, trustScale: number, cash: number, exposure: number) {
+  if (scale <= 0) return 0; // context says "do not size this up at all"
+  const want = Math.max(Math.min(risk.minStake, risk.maxStake), risk.maxStake * scale * edgeScale * trustScale);
+  const room = Math.max(0, risk.maxExposure - exposure);
+  return Math.min(want, risk.maxStake, Math.max(0, cash), room);
+}
+
 /** Taker fee per share at a given price. Polymarket's crypto fee peaks at 50¢ (about 1.75¢ per share) and shrinks toward the edges. */
 export function feePerShare(price: number, risk: Pick<RiskConfig, "feeRate" | "feeCoef">) {
   return price * risk.feeRate + risk.feeCoef * price * (1 - price);
@@ -39,11 +50,12 @@ export const APPROVAL_MS = 35_000;
 export const DRIFT_LIMIT = 0.025;
 
 export const DEFAULT_RISK: RiskConfig = {
-  maxStake: 80,
-  maxExposure: 400,
-  dailyLossLimit: 250,
-  drawdownLimit: 600,
-  maxOrdersPerHour: 8,
+  maxStake: 30,
+  minStake: 5,
+  maxExposure: 150,
+  dailyLossLimit: 90,
+  drawdownLimit: 200,
+  maxOrdersPerHour: 12,
   minEdge: 0.02,
   maxSpread: 0.06,
   minLiquidity: 1500,
@@ -416,7 +428,7 @@ export function evaluateLegacy(
   const edgeScale = clamp(edge / 0.06, 0.25, 1);
   // bet less while the model has not proven itself: full size only once its learned trust is high
   const trustScale = real ? clamp(0.3 + w, 0.3, 1) : 1;
-  const stake = Math.min(risk.maxStake * scale * edgeScale * trustScale, Math.max(0, cash));
+  const stake = sizeStake(risk, scale, edgeScale, trustScale, cash, exposure);
   if (stake < Math.min(1, risk.maxStake)) blocks.push("Paper balance is below the minimum stake");
   const unitCost = executablePrice + feePerShare(executablePrice, risk);
   const shares = stake > 0 ? stake / unitCost : 0;
@@ -571,7 +583,7 @@ export function evaluateCloser(
   const scale = clamp(extra.context?.stakeScale ?? 1, 0, 1);
   const edgeScale = clamp(edge / 0.06, 0.25, 1);
   const trustScale = clamp(0.3 + w, 0.3, 1);
-  const stake = Math.min(risk.maxStake * scale * edgeScale * trustScale, Math.max(0, cash));
+  const stake = sizeStake(risk, scale, edgeScale, trustScale, cash, exposure);
   if (stake < Math.min(1, risk.maxStake)) blocks.push("Paper balance is below the minimum stake");
   const shares = stake > 0 ? stake / unitCost : 0;
   const debit = shares * unitCost;

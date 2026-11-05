@@ -63,6 +63,16 @@ export const signOutFn = createServerFn({ method: "POST" }).handler(async (): Pr
   return { ok: true };
 });
 
+export const changePasswordFn = createServerFn({ method: "POST" })
+  .validator((i: { current: string; next: string }) => i)
+  .handler(async ({ data }): Promise<Result> => {
+    const s = await import("../accounts/session.server.ts");
+    s.assertSameSite();
+    const u = await s.currentUser();
+    if (!u) return { ok: false, error: "Sign in first." };
+    return s.accounts().changePassword(u.id, String(data.current ?? ""), String(data.next ?? ""), s.sessionToken());
+  });
+
 export const getSettings = createServerFn({ method: "GET" }).handler(async (): Promise<SettingsView | null> => {
   const s = await import("../accounts/session.server.ts");
   const { hasMasterKey } = await import("../accounts/crypto.ts");
