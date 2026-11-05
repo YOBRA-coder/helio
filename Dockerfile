@@ -2,7 +2,7 @@
 FROM node:22-slim
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+RUN npm i --no-audit --no-fund
 COPY . .
 ENV NITRO_PRESET=node-server NODE_ENV=production
 RUN npm run build
