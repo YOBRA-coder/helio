@@ -1,5 +1,5 @@
 # Replace desk.example.com with your domain (its DNS A record must point at this server).
-desk.example.com {
+helio.yobbytech.com {
 	encode zstd gzip
 
 	# Hashed build assets never change: let browsers keep them forever.
