@@ -396,6 +396,8 @@ export interface MultiFeedOpts {
   clearTimer?: (h: unknown) => void;
   silenceMs?: number;
   maxJump?: number;
+  /** a venue votes only while its newest print is younger than this (default 2.5s; quiet tickers need more) */
+  freshMs?: number;
 }
 
 const median = (xs: number[]) => {
@@ -405,7 +407,7 @@ const median = (xs: number[]) => {
 };
 
 export class MultiFeed implements PriceFeed {
-  private o: { now: () => number; WebSocketCtor: WsCtor | null; setTimer: (fn: () => void, ms: number) => unknown; clearTimer: (h: unknown) => void; silenceMs: number; maxJump: number };
+  private o: { now: () => number; WebSocketCtor: WsCtor | null; setTimer: (fn: () => void, ms: number) => unknown; clearTimer: (h: unknown) => void; silenceMs: number; maxJump: number; freshMs: number };
   private rts: VenueRt[];
   private tick: FeedTick | null = null;
   private ticks = 0;
@@ -421,6 +423,7 @@ export class MultiFeed implements PriceFeed {
       clearTimer: opts.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>)),
       silenceMs: opts.silenceMs ?? 15_000,
       maxJump: opts.maxJump ?? 0.05,
+      freshMs: opts.freshMs ?? VENUE_FRESH_MS,
     };
     this.rts = (opts.venues ?? venuesFromEnv(undefined)).map((spec) => ({
       spec,
@@ -467,7 +470,7 @@ export class MultiFeed implements PriceFeed {
   }
 
   private voting(rt: VenueRt, now = this.o.now()) {
-    return rt.lastAdj != null && !rt.bad && now - rt.lastAt <= VENUE_FRESH_MS;
+    return rt.lastAdj != null && !rt.bad && now - rt.lastAt <= this.o.freshMs;
   }
 
   latest(): FeedTick | null {

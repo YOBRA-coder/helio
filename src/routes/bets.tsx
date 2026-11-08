@@ -15,6 +15,7 @@ function Bets() {
   const simMarkets = useDesk((s) => s.simMarkets);
   const now = useDesk((s) => s.now);
   const mode = useDesk((s) => s.mode);
+  const orders = useDesk((s) => s.orders);
   const quotes = useLive((s) => s.quotes);
   const btc = useLive((s) => s.btc);
   const deskSpot = useDesk((s) => s.spot);
@@ -77,6 +78,24 @@ function Bets() {
                     <Cell k="Sell price" v={`${Math.round(mark * 100)}¢`} />
                     <Cell k="P&L now" v={signedMoney(unreal)} tone={unreal >= 0 ? "text-primary" : "text-danger"} />
                   </dl>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel title={`Orders (${orders.length})`}>
+          {orders.length === 0 ? (
+            <p className="text-sm text-muted">No orders yet. An order appears here the moment the desk sends one, with whether it filled or timed out.</p>
+          ) : (
+            <ul className="divide-y divide-line text-sm">
+              {orders.slice(0, 15).map((o) => (
+                <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                  <span className="min-w-0 flex-1 truncate">{o.side === "yes" ? "Up" : "Down"} · {o.question}</span>
+                  <span className="font-mono text-xs text-muted">{o.quantity.toFixed(1)} @ {Math.round(o.limitPrice * 100)}¢ · {clock(o.submittedAt)}</span>
+                  <Pill tone={o.status === "filled" ? "good" : o.status === "cancelled" ? "bad" : "neutral"}>
+                    {o.status === "cancelled" ? "not filled" : o.status}
+                  </Pill>
                 </li>
               ))}
             </ul>

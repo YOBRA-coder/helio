@@ -72,7 +72,7 @@ export class Hub {
     this.store = store;
     this.env = env;
     this.now = now;
-    this.feed = env.HELIOS_WS_FEED === "0" ? null : new MultiFeed({ now, venues: venuesFromEnv(env.HELIOS_FEED_VENUES) });
+    this.feed = env.HELIOS_WS_FEED === "0" ? null : new MultiFeed({ now, freshMs: 6_000, venues: venuesFromEnv(env.HELIOS_FEED_VENUES) });
     this.book = env.HELIOS_BOOK_WS === "0" ? null : new BookFeed({ now });
     this.shared = {
       loadTape: cached(5_500, loadTape, now),

@@ -42,7 +42,7 @@ export function useLiveFeeds() {
 
     const startAll = () => {
       if (dead || feed) return;
-      feed = new MultiFeed({ venues: venuesFromEnv(undefined) });
+      feed = new MultiFeed({ freshMs: 6_000, venues: venuesFromEnv(undefined) });
       feed.start();
       let n = 0;
       pump = window.setInterval(() => {

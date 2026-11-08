@@ -233,3 +233,25 @@ test("pace: balanced acts at 0.75 sd where selective waits", async () => {
   assert.equal(closerParams(undefined), PACES.balanced);
   assert.equal(closerParams("nonsense"), PACES.balanced);
 });
+
+test("end to end: a decided late window under default settings becomes a filled position", async () => {
+  const { applyTape } = await import("./ledger.ts");
+  const T = 1_800_000_000_000;
+  const tape: TapePayload = {
+    spot: 100_000, spotSource: "t", fetchedAt: T, error: null,
+    markets: [{
+      id: "m1", question: "Bitcoin Up or Down - test", slug: "s", eventSlug: "e", eventTitle: "t", outcomes: ["Up", "Down"],
+      yesPrice: 0.5, bestBid: 0.6, bestAsk: 0.62, liquidity: 20_000, volume: 1000, endAt: T + 120_000, startAt: T - 180_000,
+      description: "x".repeat(80), group: "5m", restricted: false, yesTokenId: "111111111111", noTokenId: "222222222222", conditionId: "0xc", booked: true,
+    }],
+  };
+  let s = applyTape(makeCore(T), tape, { "poly-m1": 100_000 }, T);
+  s = { ...s, mode: "auto" };
+  for (let i = 1; i <= 60; i += 1) {
+    const now = T + i * 1000;
+    s = applyTape(s, { ...tape, fetchedAt: now }, { "poly-m1": 100_000 }, now);
+    s = tickCore(s, { now, spot: 100_120, spotFresh: true, spotDtMs: 500, sim: false });
+  }
+  const sigs = s.signals.map((x) => `${x.status}:${x.rejectedReason ?? ""}`);
+  assert.ok(s.fills.length > 0 || s.positions.length > 0, `expected a fill; signals were ${sigs.slice(0, 5).join(" | ")}`);
+});

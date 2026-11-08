@@ -539,7 +539,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
     }
     const touch = order.side === "yes" ? market.yesAsk : 1 - market.yesBid;
     const fillPrice = Math.min(order.limitPrice, touch + risk.slippage);
-    if (order.kind !== "sim-window" && touch + risk.slippage > order.limitPrice + 0.006) return order;
+    if (order.kind !== "sim-window" && touch + risk.slippage > order.limitPrice + 0.012) return order;
     const notional = order.quantity * fillPrice;
     const fee = order.quantity * feePerShare(fillPrice, risk);
     const spent = Math.min(order.debit, notional + fee);

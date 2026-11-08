@@ -583,9 +583,6 @@ export function evaluateCloser(
   const modelForSide = side === "yes" ? p : 1 - p;
   const unitCost = executablePrice + feePerShare(executablePrice, risk);
 
-  if (Math.abs(read.p - mid) > 0.25) {
-    blocks.push(`Model (${Math.round(read.p * 100)}%) and market (${Math.round(mid * 100)}%) disagree by over 25 points: treated as a data problem, not an edge`);
-  }
   const C = closerParams(risk.pace);
   const len = market.endAt - market.startAt;
   const zone = clamp(len * C.zoneFraction, C.zoneMinMs, C.zoneMaxMs);
@@ -593,8 +590,14 @@ export function evaluateCloser(
   if (left > zone) {
     blocks.push(`Too early: this strategy only acts in the last ${Math.round(zone / 1000)}s of a window, when the outcome is largely decided`);
   }
+  if (now < market.startAt) blocks.push("Too early: this window has not opened yet");
   const streak = clamp(Math.round(extra.lossStreak ?? 0), 0, 3);
   const needZ = C.minZ + LOSS_Z_STEP * streak;
+  // A model/market gap only means "bad data" when the strategy is otherwise ready to act. Earlier in a window, or in a
+  // window that has not opened (its book is thin and meaningless), the gap is expected and is not logged.
+  if (now >= market.startAt && left <= zone && Math.abs(read.z) >= needZ && Math.abs(read.p - mid) > 0.25) {
+    blocks.push(`Model (${Math.round(read.p * 100)}%) and market (${Math.round(mid * 100)}%) disagree by over 25 points: treated as a data problem, not an edge`);
+  }
   if (Math.abs(read.z) < needZ) {
     blocks.push(
       `Not decided yet: BTC is ${Math.abs(read.z).toFixed(2)} standard deviations from the open, and this strategy needs ${needZ.toFixed(1)}${streak ? ` (raised after ${streak} recent loss${streak > 1 ? "es" : ""})` : ""}`,
