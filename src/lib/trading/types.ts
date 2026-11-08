@@ -345,8 +345,20 @@ export interface DeskCore {
   live: LiveBook;
 }
 
+/** Safety facts from the live BTC feed that the closer strategy uses to refuse shaky entries. */
+export interface FeedGuard {
+  /** BTC price about 15 seconds ago from the feed's own recording; null when it has none */
+  p15: number | null;
+  /** how far apart the voting exchanges are right now, in basis points; null with fewer than two */
+  spreadBp: number | null;
+  /** exchanges currently voting */
+  venues: number;
+}
+
 export interface TickCtx {
   now: number;
+  /** live-feed safety facts for this tick (null/absent on the REST fallback) */
+  feed?: FeedGuard | null;
   spot: number | null;
   spotSource?: string;
   /** true when `spot` is a new print since the last tick (keeps the vol sample honest). */

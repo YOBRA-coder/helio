@@ -140,3 +140,11 @@ The account is signed out everywhere. Saved keys and the desk are untouched. Onc
 
 ## Limits: what stops trades
 Controls shows each limit's live usage and what blocks a signal. The two that most often cause "trades, then a pause": orders per hour (a rolling 60 minutes) and open exposure. Small bets leave room for many more concurrent trades under the same exposure. Presets: Small bets (more trades), Balanced (default), Big bets (fewer trades). Existing accounts keep their saved limits until you pick a preset.
+
+## Speed and feed notes (upgrade)
+
+- Caddy now compresses responses and caches `/assets/*` as immutable; nitro precompresses public assets. Rebuild and `caddy reload` after pulling.
+- The worker needs Node 22+ (websockets). It connects to Coinbase, Binance and Kraken at once, averages them after removing the USDT premium and drops any venue that is more than 15bp off the rest. Control with `HELIOS_FEED_VENUES`.
+- Polymarket bids/asks stream from the public order-book websocket (`HELIOS_BOOK_WS=0` falls back to REST).
+- If your VPS region blocks Binance, the worker automatically uses the other venues; check the heartbeat log for per-venue status.
+- Pages poll every 2s while visible and 10s when the tab is hidden; unchanged snapshots return a tiny response.

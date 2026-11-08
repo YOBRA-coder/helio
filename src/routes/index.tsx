@@ -1,4 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { LiveTape } from "@/components/analysis";
+import { AutoBanner } from "@/components/auto-status";
+import { useMemo } from "react";
 import { EquityDrawdownChart, SpotChart } from "@/components/charts";
 import { Button, Countdown, Panel, Pill, Stat } from "@/components/widgets";
 import { money, px, signedMoney, age } from "@/lib/trading/format";
@@ -30,6 +33,8 @@ function DeskHome() {
   const spotDtMs = useDesk((s) => s.spotDtMs);
   const flatten = useDesk((s) => s.flatten);
   const scores = useDesk((s) => s.trial?.summary);
+  const trialRecent = useDesk((s) => s.trial?.recent);
+  const liveScores = useMemo(() => (trialRecent ?? []).filter((r) => r.kind === "live"), [trialRecent]);
 
   const day = useDesk((s) => s.trial?.summary.last24h) ?? { trades: 0, wins: 0, pnl: 0 };
   const openList = positions.filter((p) => p.status === "open").sort((a, b) => a.endAt - b.endAt);
@@ -72,6 +77,8 @@ function DeskHome() {
 
   return (
     <div className="space-y-4">
+      <AutoBanner />
+      <LiveTape recent={liveScores} />
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="max-w-3xl lg:col-span-3">
           <h1 className="text-3xl font-semibold tracking-tight">The night desk for BTC contracts.</h1>

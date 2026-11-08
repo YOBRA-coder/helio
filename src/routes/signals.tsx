@@ -1,3 +1,5 @@
+import { WindowRadar } from "@/components/analysis";
+import { classifyBlock } from "@/lib/trading/blocks";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { SignalCard } from "@/components/signal-card";
@@ -14,6 +16,8 @@ const TABS = ["Pending", "Blocked", "History", "All"] as const;
 
 function SignalsPage() {
   const signals = useDesk((s) => s.signals);
+  const trial = useDesk((s) => s.trial);
+  const liveScores = useMemo(() => (trial?.recent ?? []).filter((r) => r.kind === "live"), [trial?.recent]);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Pending");
   const [query, setQuery] = useState("");
   const [win, setWin] = useState<"all" | "5m" | "15m" | "1h" | "4h">("all");
@@ -80,14 +84,19 @@ function SignalsPage() {
           </button>
         ))}
       </div>
+      <WindowRadar recent={liveScores} />
       {reasons.length > 0 && (
         <div className="rounded-lg border border-line bg-surface p-4">
-          <p className="text-sm font-semibold">Why signals were blocked</p>
+          <p className="text-sm font-semibold">Why signals were held back</p>
+          <p className="mt-1 text-xs text-muted">"Waiting for a setup" is not a rejection, so it is no longer logged here: see the live radar above.</p>
           <ul className="mt-2 space-y-1">
             {reasons.map(([text, n]) => (
               <li key={text}>
                 <button type="button" onClick={() => { setReason(reason === text ? null : text); setTab("Blocked"); }} className={`flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left text-sm ${reason === text ? "bg-primary text-primary-fg" : ""}`}>
-                  <span className="min-w-0 flex-1">{text.replace("#", "…")}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="mr-2 rounded-full bg-raised px-2 py-0.5 text-xs text-muted">{classifyBlock(text).label}</span>
+                    {text.replace("#", "…")}
+                  </span>
                   <span className="font-mono tabular-nums">{n}</span>
                 </button>
               </li>

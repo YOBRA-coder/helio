@@ -96,3 +96,11 @@ Lab effect (new strategy, 5m windows, 12,000 windows per row, net per 3,000 wind
 
 Read this carefully: the faster feed does not create an edge against a crowd that is already instant (0 s row: it just trades less, more safely). It helps only when the crowd is a second or more behind, where it roughly triples profit in the lab. The Polymarket side (order book quotes) is still polled every ~2.5s; a websocket for that is the next speed-up.
 **Not tested against the real Coinbase socket** (this build environment has no outbound access). The logic is tested with a fake socket. After deploying, check the worker log shows `BTC feed: live`.
+
+## Upgrade: guards and block handling
+
+- Window open price comes from the multi-venue feed history, so windows no longer wait on a candle lookup.
+- Snap-back guard: skip when BTC moved against the bet by more than 0.35 sd in the last 15s.
+- Exchange-disagreement guard: skip when venue spread exceeds 8bp.
+- Loss-streak ramp: after consecutive real losses the required z-score rises by 0.25 per loss (max 3) and stakes halve from 2 losses.
+- "Not yet" states (waiting for the closing part of a window) are no longer logged as blocked signals. They show on the live Window Radar (Signals, Analysis, Desk). Only real rejections are logged, tagged waiting/quality/data/guard/risk/stop.

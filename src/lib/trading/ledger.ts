@@ -6,6 +6,7 @@
  * week-long trial does. Nothing here touches the network, the clock, or storage;
  * callers pass `now` and any market data in.
  */
+import { classifyBlock } from "./blocks.ts";
 import {
   APPROVAL_MS,
   circuitMessage,
@@ -163,6 +164,19 @@ export function coolOffReason(scores: ScoreRow[], now: number): string | null {
   return lastReal.length === 4 && lastReal.every((r) => r.pnl < 0) && now - lastReal[0].settledAt < 3_600_000
     ? "Cooling off for an hour after 4 losing trades in a row"
     : null;
+}
+
+/** Consecutive real-market losses (newest first, within 45 minutes), capped at 3. Raises the entry bar and halves the size. */
+export function recentLossStreak(scores: ScoreRow[], now: number): number {
+  let n = 0;
+  for (const r of scores) {
+    if (!(r.official && r.venue === "paper" && r.kind !== "sim-window")) continue;
+    if (now - r.settledAt > 45 * 60_000) break;
+    if (r.pnl < 0) n += 1;
+    else break;
+    if (n >= 3) break;
+  }
+  return n;
 }
 
 export interface LimitRow {
@@ -686,6 +700,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
     const vol = realizedVol(spots, spotDtMs);
     // loss-streak breaker: 4 real losses in a row pauses real-market entries for an hour
     const coolOff = coolOffReason(scores, now);
+    const lossStreak = recentLossStreak(scores, now);
     let created = 0;
     for (const market of book) {
       if (created >= 2) break;
@@ -697,7 +712,7 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
       if (pending || recent || resting || held) continue;
       const opp = evaluateOpportunity(
         market, spot, now, risk, cash, exposureOf(positions, orders), ordersLastHour, s.killed, circuit,
-        { vol, context, spots, spotDtMs, staleMs: ctx.spotAgeMs, blendW: s.blend.w, coolOff },
+        { vol, context, spots, spotDtMs, staleMs: ctx.spotAgeMs, blendW: s.blend.w, coolOff, feed: ctx.feed ?? null, lossStreak },
       );
       const lastSame = signals.find((sig) => sig.marketId === market.id);
       const draft = (status: Signal["status"], expiresAt: number, mode: Mode, reason: string | null): Signal => ({
@@ -728,6 +743,8 @@ export function tickCore(s: DeskCore, ctx: TickCtx): DeskCore {
         mode,
       });
       if (opp.hardFail) {
+        // "not yet" is the normal state of most windows: it lives on the live watch-list, not in the blocked log
+        if (classifyBlock(opp.hardFail).kind === "waiting") continue;
         const nearMiss = market.kind === "sim-window" || opp.edge > -0.025;
         const recentBlocks = signals.filter((sig) => sig.status === "blocked" && now - sig.createdAt < 50_000).length;
         if (!nearMiss || recentBlocks >= 5) continue;

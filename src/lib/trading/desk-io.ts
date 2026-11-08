@@ -3,7 +3,7 @@
  * One writer: the worker. Everything else sends commands through the queue directory.
  */
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, rename, unlink, writeFile, appendFile, copyFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, unlink, writeFile, appendFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DeskCommand, DeskCore } from "./types.ts";
 
@@ -54,6 +54,30 @@ export async function readSnapshot(dir: string): Promise<Snapshot | null> {
     }
   }
   return null;
+}
+
+const snapCache = new Map<string, { rev: string; snap: Snapshot }>();
+
+/**
+ * Same as readSnapshot, but the file is only parsed again when it actually changed on disk (the worker rewrites it every
+ * ~5s). The web server used to re-read and re-parse a multi-megabyte file on every poll from every open tab; now a
+ * poll costs one stat(). `rev` identifies the version so the browser can skip the download when nothing changed.
+ */
+export async function readSnapshotCached(dir: string): Promise<{ snap: Snapshot; rev: string } | null> {
+  try {
+    const st = await stat(join(dir, "desk.json"));
+    const rev = `${Math.round(st.mtimeMs)}-${st.size}`;
+    const hit = snapCache.get(dir);
+    if (hit && hit.rev === rev) return hit;
+    const snap = await readSnapshot(dir);
+    if (!snap) return null;
+    const entry = { rev, snap };
+    snapCache.set(dir, entry);
+    return entry;
+  } catch {
+    const snap = await readSnapshot(dir); // desk.json missing or mid-rename: fall back to the backup
+    return snap ? { snap, rev: `bak-${snap.heartbeat}` } : null;
+  }
 }
 
 export async function appendJournal(dir: string, rows: unknown[]) {

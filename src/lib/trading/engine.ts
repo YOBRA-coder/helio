@@ -1,4 +1,5 @@
 import type {
+  FeedGuard,
   BacktestPeriod,
   ContextSnapshot,
   BacktestReport,
@@ -233,6 +234,13 @@ export const CLOSER = {
   maxEdge: 0.15,
 };
 
+/** Refuse an entry when BTC moved this many sd (of the time left) against it in the last 15s. */
+export const SNAPBACK_SD = 0.35;
+/** Refuse an entry when the exchanges' prices differ by more than this many basis points. */
+export const MAX_VENUE_SPREAD_BP = 8;
+/** Each recent loss raises the required distance from the open by this many sd. */
+export const LOSS_Z_STEP = 0.25;
+
 export function yesProbability(market: Market, spot: number, now: number, annualVol: number | null = null, staleMs = 6000) {
   const isUpDown = /up or down/i.test(market.question);
   if (market.kind !== "sim-window" && isUpDown && market.openSpot) {
@@ -365,7 +373,7 @@ export function evaluateLegacy(
   if (!market.metadataOk) {
     blocks.push(
       /up or down/i.test(market.question) && market.openSpot == null
-        ? "Waiting for the window-open BTC price (Coinbase candle not loaded yet)"
+        ? "Waiting for the window-open BTC price (not recorded for this window yet)"
         : "Resolution metadata is missing or ambiguous",
     );
   }
@@ -481,6 +489,10 @@ export interface EvalExtra {
   staleMs?: number;
   blendW?: number;
   coolOff?: string | null;
+  /** safety facts from the live BTC feed (null on the REST fallback) */
+  feed?: FeedGuard | null;
+  /** consecutive recent real-market losses (0..3). Each one raises the bar for the next entry. */
+  lossStreak?: number;
   /** "closer" (default, helios-btc-0.6) or "legacy" (helios-btc-0.5, kept for comparison in the strategy lab) */
   strategy?: "legacy" | "closer";
 }
@@ -527,7 +539,7 @@ export function evaluateCloser(
   if (killed) blocks.push("Kill switch is on");
   if (circuit) blocks.push(circuit);
   if (!market.metadataOk) {
-    blocks.push(market.openSpot == null ? "Waiting for the window-open BTC price (Coinbase candle not loaded yet)" : "Resolution metadata is missing or ambiguous");
+    blocks.push(market.openSpot == null ? "Waiting for the window-open BTC price (not recorded for this window yet)" : "Resolution metadata is missing or ambiguous");
   }
   if (market.restricted) blocks.push("Eligibility cannot be verified");
   if (market.status !== "open") blocks.push("Market is not open");
@@ -568,8 +580,23 @@ export function evaluateCloser(
   if (left > zone) {
     blocks.push(`Too early: this strategy only acts in the last ${Math.round(zone / 1000)}s of a window, when the outcome is largely decided`);
   }
-  if (Math.abs(read.z) < CLOSER.minZ) {
-    blocks.push(`Not decided yet: BTC is ${Math.abs(read.z).toFixed(2)} standard deviations from the open, and this strategy needs ${CLOSER.minZ.toFixed(1)}`);
+  const streak = clamp(Math.round(extra.lossStreak ?? 0), 0, 3);
+  const needZ = CLOSER.minZ + LOSS_Z_STEP * streak;
+  if (Math.abs(read.z) < needZ) {
+    blocks.push(
+      `Not decided yet: BTC is ${Math.abs(read.z).toFixed(2)} standard deviations from the open, and this strategy needs ${needZ.toFixed(1)}${streak ? ` (raised after ${streak} recent loss${streak > 1 ? "es" : ""})` : ""}`,
+    );
+  }
+  // Loss guards from the live feed: a decided window can still flip, and these are the two ways we see it coming.
+  const fg = extra.feed;
+  if (fg?.p15 != null && read.sigma > 0) {
+    const against = side === "yes" ? fg.p15 - spot : spot - fg.p15; // dollars moved against this side in 15s
+    if (against > SNAPBACK_SD * read.sigma) {
+      blocks.push(`BTC is snapping back against this side ($${against.toFixed(0)} in 15s): waiting for it to settle`);
+    }
+  }
+  if (fg?.spreadBp != null && fg.spreadBp > MAX_VENUE_SPREAD_BP) {
+    blocks.push(`Exchanges disagree on the BTC price by ${fg.spreadBp.toFixed(1)} bp: the settlement price is too uncertain`);
   }
   const needEdge = Math.max(risk.minEdge, CLOSER.minEdge);
   if (edge > CLOSER.maxEdge) {
@@ -580,7 +607,8 @@ export function evaluateCloser(
     blocks.push(`Executable price is outside the ${Math.round(CLOSER.priceLo * 100)}¢–${Math.round(CLOSER.priceHi * 100)}¢ band (favourites only)`);
   }
 
-  const scale = clamp(extra.context?.stakeScale ?? 1, 0, 1);
+  // two losses in a row halve the size (never below the minimum stake) until a win
+  const scale = clamp(extra.context?.stakeScale ?? 1, 0, 1) * (streak >= 2 ? 0.5 : 1);
   const edgeScale = clamp(edge / 0.06, 0.25, 1);
   const trustScale = clamp(0.3 + w, 0.3, 1);
   const stake = sizeStake(risk, scale, edgeScale, trustScale, cash, exposure);

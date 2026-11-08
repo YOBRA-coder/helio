@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { AutoBanner, AutoConfirmDialog } from "@/components/auto-status";
 import { Button, Panel, ThemeSwatches } from "@/components/widgets";
 import { DEFAULT_RISK, MODEL_VERSION } from "@/lib/trading/engine";
-import { limitUsage } from "@/lib/trading/ledger";
+import { limitUsage, sanitizeRisk } from "@/lib/trading/ledger";
 import type { RiskConfig } from "@/lib/trading/types";
 import { useDesk } from "@/lib/trading/store";
 
@@ -55,7 +56,6 @@ function ControlsPage() {
   const simulateMismatch = useDesk((s) => s.simulateMismatch);
   const clearMismatch = useDesk((s) => s.clearMismatch);
   const [confirmAuto, setConfirmAuto] = useState(false);
-  const [armed, setArmed] = useState(false);
   const [confirmResume, setConfirmResume] = useState(false);
 
   return (
@@ -67,6 +67,8 @@ function ControlsPage() {
           build never asks for a wallet seed and never sends a live order.
         </p>
       </div>
+
+      <AutoBanner />
 
       <Panel title="Themes">
         <ThemeSwatches />
@@ -153,37 +155,7 @@ function ControlsPage() {
       </Panel>
 
       <Panel title="Risk limits">
-        <div className="mb-4 grid gap-2 sm:grid-cols-3">
-          {PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => updateRisk(p.values)}
-              className={`rounded-xl border px-3 py-2 text-left ${same(p.values) ? "border-primary text-primary" : "border-line text-muted"}`}
-            >
-              <span className="block text-sm font-semibold">{p.name}{same(p.values) ? " · active" : ""}</span>
-              <span className="block text-xs">{p.note}</span>
-            </button>
-          ))}
-        </div>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <Button variant="quiet" onClick={() => updateRisk(pick(DEFAULT_RISK))} disabled={same(pick(DEFAULT_RISK))}>Reset to defaults</Button>
-          <Button variant="quiet" onClick={() => updateRisk(opened)} disabled={same(opened)}>Undo changes since opening</Button>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <Slider label="Max stake (biggest single bet)" value={risk.maxStake} min={5} max={500} step={5} format={(n) => `$${n}`} onChange={(maxStake) => updateRisk({ maxStake })} />
-          <Slider label="Min stake (smallest single bet)" value={risk.minStake} min={5} max={Math.max(5, risk.maxStake)} step={5} format={(n) => `$${n}`} onChange={(minStake) => updateRisk({ minStake })} />
-          <Slider label="Max open exposure" value={risk.maxExposure} min={5} max={2000} step={5} format={(n) => `$${n}`} onChange={(maxExposure) => updateRisk({ maxExposure })} />
-          <Slider label="Daily loss limit" value={risk.dailyLossLimit} min={2} max={1000} step={2} format={(n) => `$${n}`} onChange={(dailyLossLimit) => updateRisk({ dailyLossLimit })} />
-          <Slider label="Drawdown breaker" value={risk.drawdownLimit} min={50} max={2000} step={10} format={(n) => `$${n}`} onChange={(drawdownLimit) => updateRisk({ drawdownLimit })} />
-          <Slider label="Orders per hour" value={risk.maxOrdersPerHour} min={1} max={60} step={1} format={(n) => String(n)} onChange={(maxOrdersPerHour) => updateRisk({ maxOrdersPerHour })} />
-          <Slider label="Minimum net edge" value={risk.minEdge} min={0} max={0.1} step={0.005} format={(n) => n.toFixed(3)} onChange={(minEdge) => updateRisk({ minEdge })} />
-          <Slider label="Max spread" value={risk.maxSpread} min={0.01} max={0.12} step={0.005} format={(n) => `${Math.round(n * 100)}¢`} onChange={(maxSpread) => updateRisk({ maxSpread })} />
-          <Slider label="Min liquidity" value={risk.minLiquidity} min={0} max={20000} step={100} format={(n) => `$${n}`} onChange={(minLiquidity) => updateRisk({ minLiquidity })} />
-          <Slider label="Polymarket taker fee (per share at 50¢)" value={risk.feeCoef} min={0} max={0.1} step={0.005} format={(n) => `${(n * 25).toFixed(2)}¢`} onChange={(feeCoef) => updateRisk({ feeCoef })} />
-          <Slider label="Slippage" value={risk.slippage} min={0} max={0.03} step={0.001} format={(n) => `${(n * 100).toFixed(1)}¢`} onChange={(slippage) => updateRisk({ slippage })} />
-        </div>
-        <p className="mt-3 text-sm text-muted">Model {MODEL_VERSION}. Uncertainty haircut {risk.uncertaintyHaircut}. Freshness window {Math.round(risk.freshnessMs / 1000)}s.</p>
+        <LimitsForm />
       </Panel>
 
       <Panel title="Reconciliation">
@@ -219,36 +191,7 @@ function ControlsPage() {
         </ol>
       </Panel>
 
-      {confirmAuto && (
-        <dialog open className="scrim fixed inset-0 z-40 m-0 grid place-items-end p-4 sm:place-items-center">
-          <div className="w-full max-w-md rounded-lg border border-line bg-surface p-4" role="dialog" aria-modal="true" aria-labelledby="auto-title">
-            <h2 id="auto-title" className="text-lg font-semibold">Enable auto paper mode?</h2>
-            <p className="mt-2 text-sm text-muted">
-              Qualifying paper orders can submit without another click. Risk gates still apply. This does not connect an exchange account.
-            </p>
-            <label className="mt-3 flex items-start gap-3 text-sm">
-              <input type="checkbox" checked={armed} onChange={(event) => setArmed(event.target.checked)} />
-              I understand these are paper orders inside the limits I set.
-            </label>
-            <div className="mt-4 flex gap-2">
-              <Button
-                type="button"
-                disabled={!armed}
-                onClick={() => {
-                  setMode("auto");
-                  setConfirmAuto(false);
-                  setArmed(false);
-                }}
-              >
-                Enable auto
-              </Button>
-              <Button type="button" variant="quiet" onClick={() => setConfirmAuto(false)}>
-                Keep manual
-              </Button>
-            </div>
-          </div>
-        </dialog>
-      )}
+      <AutoConfirmDialog open={confirmAuto} onClose={() => setConfirmAuto(false)} />
 
       {confirmResume && (
         <dialog open className="scrim fixed inset-0 z-40 m-0 grid place-items-end p-4 sm:place-items-center">
@@ -276,61 +219,146 @@ function ControlsPage() {
   );
 }
 
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  format,
-  onChange,
-}: {
+type LimitKey = (typeof LIMIT_KEYS)[number];
+interface Field {
+  key: LimitKey;
   label: string;
-  value: number;
   min: number;
   max: number;
   step: number;
-  format: (n: number) => string;
-  onChange: (value: number) => void;
-}) {
-  // The thumb follows the finger instantly; the setting is sent once, when the finger lifts.
-  const [draft, setDraft] = useState<number | null>(null);
-  const timer = useRef<number | null>(null);
-  const latest = useRef<number | null>(null);
-  const commit = () => {
-    if (timer.current) window.clearTimeout(timer.current);
-    timer.current = null;
-    if (latest.current != null) onChange(latest.current);
-    latest.current = null;
-    setDraft(null);
+  unit: "$" | "¢" | "";
+  /** shown value = stored value * scale (fees and slippage are stored as fractions of a dollar) */
+  scale?: number;
+}
+const FIELDS: Field[] = [
+  { key: "maxStake", label: "Max stake (biggest single bet)", min: 5, max: 1000, step: 5, unit: "$" },
+  { key: "minStake", label: "Min stake (smallest single bet)", min: 5, max: 1000, step: 5, unit: "$" },
+  { key: "maxExposure", label: "Max open exposure", min: 5, max: 5000, step: 5, unit: "$" },
+  { key: "dailyLossLimit", label: "Daily loss limit", min: 2, max: 2000, step: 1, unit: "$" },
+  { key: "drawdownLimit", label: "Drawdown breaker", min: 50, max: 3000, step: 10, unit: "$" },
+  { key: "maxOrdersPerHour", label: "Orders per hour", min: 1, max: 60, step: 1, unit: "" },
+  { key: "minEdge", label: "Minimum net edge (cents per share)", min: 0, max: 20, step: 0.5, unit: "¢", scale: 100 },
+  { key: "maxSpread", label: "Max spread (cents)", min: 0.5, max: 20, step: 0.5, unit: "¢", scale: 100 },
+  { key: "minLiquidity", label: "Min liquidity", min: 0, max: 100000, step: 100, unit: "$" },
+  { key: "feeCoef", label: "Taker fee coefficient (per share, x0.25 = cents at 50¢)", min: 0, max: 0.2, step: 0.005, unit: "" },
+  { key: "slippage", label: "Slippage (cents)", min: 0, max: 5, step: 0.1, unit: "¢", scale: 100 },
+];
+const round = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/**
+ * Limits are edited as a draft and applied only when you press Save. Nothing is sent while you drag or type, so a
+ * slip of the thumb can no longer change a limit, and you can type an exact number.
+ */
+function LimitsForm() {
+  const risk = useDesk((s) => s.risk);
+  const updateRisk = useDesk((s) => s.updateRisk);
+  const [draft, setDraft] = useState<Partial<RiskConfig>>(() => pick(risk));
+  const [opened] = useState(() => pick(risk));
+  const dirty = useMemo(() => LIMIT_KEYS.some((k) => Math.abs(round(draft[k] as number) - round(risk[k] as number)) > 1e-9), [draft, risk]);
+  // follow the saved values while there is nothing unsaved (for example after another tab or the worker changed them)
+  useEffect(() => {
+    if (!dirty) setDraft(pick(risk));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [risk]);
+  const same = (v: Partial<RiskConfig>) => LIMIT_KEYS.every((k) => v[k] === undefined || Math.abs((draft[k] as number) - (v[k] as number)) < 1e-9);
+  const minOverMax = (draft.minStake as number) > (draft.maxStake as number);
+  const save = () => {
+    const clean = sanitizeRisk({ ...risk, ...(draft as RiskConfig) });
+    const next = pick(clean);
+    setDraft(next);
+    updateRisk(next);
   };
-  const shown = draft ?? value;
   return (
-    <label className="block text-sm">
+    <div>
+      <div className="mb-4 grid gap-2 sm:grid-cols-3">
+        {PRESETS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => setDraft({ ...draft, ...p.values })}
+            className={`rounded-xl border px-3 py-2 text-left ${same(p.values) ? "border-primary text-primary" : "border-line text-muted"}`}
+          >
+            <span className="block text-sm font-semibold">{p.name}{same(p.values) ? " · loaded" : ""}</span>
+            <span className="block text-xs">{p.note}</span>
+          </button>
+        ))}
+      </div>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Button variant="quiet" onClick={() => setDraft(pick(DEFAULT_RISK))} disabled={same(pick(DEFAULT_RISK))}>Load defaults</Button>
+        <Button variant="quiet" onClick={() => setDraft(opened)} disabled={same(opened)}>Load what it was when I opened this page</Button>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {FIELDS.map((f) => (
+          <NumberField
+            key={f.key}
+            field={f}
+            value={draft[f.key] as number}
+            saved={risk[f.key] as number}
+            onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+          />
+        ))}
+      </div>
+      {minOverMax && <p className="mt-3 text-sm text-danger" role="alert">Min stake cannot be bigger than max stake.</p>}
+      <div className={`sticky bottom-20 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 md:bottom-4 ${dirty ? "border-primary bg-surface" : "border-line bg-surface"}`}>
+        <p className="text-sm">{dirty ? "You have unsaved changes. Nothing is applied until you save." : "All limits are saved."}</p>
+        <div className="flex gap-2">
+          <Button type="button" variant="quiet" disabled={!dirty} onClick={() => setDraft(pick(risk))}>Discard</Button>
+          <Button type="button" disabled={!dirty || minOverMax} onClick={save}>Save limits</Button>
+        </div>
+      </div>
+      <p className="mt-3 text-sm text-muted">Model {MODEL_VERSION}. Uncertainty haircut {risk.uncertaintyHaircut}. Freshness window {Math.round(risk.freshnessMs / 1000)}s.</p>
+    </div>
+  );
+}
+
+function NumberField({ field, value, saved, onChange }: { field: Field; value: number; saved: number; onChange: (v: number) => void }) {
+  const scale = field.scale ?? 1;
+  const shown = round(value * scale);
+  const [text, setText] = useState(String(shown));
+  // keep the text box in step when the value changes from outside (presets, discard, save)
+  useEffect(() => {
+    if (round(Number(text) / 1) !== shown) setText(String(shown));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown]);
+  const clampShown = (n: number) => Math.min(field.max, Math.max(field.min, n));
+  const set = (n: number) => {
+    const c = round(clampShown(n));
+    setText(String(c));
+    onChange(round(c / scale));
+  };
+  const changed = Math.abs(round(value) - round(saved)) > 1e-9;
+  return (
+    <div className="block text-sm">
       <span className="flex items-center justify-between gap-3">
-        <span>{label}</span>
-        <span className="font-mono tabular-nums text-primary">{format(shown)}</span>
+        <label htmlFor={`lim-${field.key}`}>{field.label}</label>
+        {changed && <span className="text-xs text-primary">was {round(saved * scale)}{field.unit === "¢" ? "¢" : ""}</span>}
       </span>
-      <input
-        className="mt-2 touch-pan-y"
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={shown}
-        onChange={(event) => {
-          const v = Number(event.target.value);
-          latest.current = v;
-          setDraft(v);
-          if (timer.current) window.clearTimeout(timer.current);
-          timer.current = window.setTimeout(commit, 700); // safety net if no release event arrives
-        }}
-        onPointerUp={commit}
-        onTouchEnd={commit}
-        onKeyUp={commit}
-        onBlur={commit}
-        aria-label={label}
-      />
-    </label>
+      <div className="mt-2 flex items-center gap-2">
+        <button type="button" className="h-10 w-10 rounded-lg border border-line text-lg" aria-label={`Decrease ${field.label}`} onClick={() => set(shown - field.step)}>−</button>
+        <div className="relative flex-1">
+          {field.unit === "$" && <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">$</span>}
+          <input
+            id={`lim-${field.key}`}
+            className={`h-10 w-full rounded-lg border border-line bg-surface font-mono tabular-nums ${field.unit === "$" ? "pl-6" : "pl-3"} pr-3`}
+            type="text"
+            inputMode="decimal"
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              const n = Number(e.target.value);
+              if (e.target.value.trim() !== "" && Number.isFinite(n)) onChange(round(n / scale));
+            }}
+            onBlur={() => set(Number.isFinite(Number(text)) && text.trim() !== "" ? Number(text) : shown)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+          />
+          {field.unit === "¢" && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted">¢</span>}
+        </div>
+        <button type="button" className="h-10 w-10 rounded-lg border border-line text-lg" aria-label={`Increase ${field.label}`} onClick={() => set(shown + field.step)}>+</button>
+      </div>
+      {/* the slider only moves the draft: it sends nothing, and it never changes a number on its own */}
+      <input className="mt-2 w-full touch-pan-y" type="range" min={field.min} max={field.max} step={field.step} value={clampShown(shown)} onChange={(e) => set(Number(e.target.value))} aria-label={`${field.label} slider`} />
+    </div>
   );
 }

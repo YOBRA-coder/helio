@@ -4,6 +4,10 @@ import type { GateCheck, TrialSummary } from "./trial.ts";
 
 /** What the browser sees: the core with the heavy arrays trimmed, plus server-computed trial stats. */
 export interface DeskView {
+  /** version of the snapshot this answer describes; send it back as `since` to skip an unchanged download */
+  rev?: string;
+  /** true when `since` matched: nothing but the liveness fields below is filled in */
+  unchanged?: boolean;
   alive: boolean;
   heartbeatAgeMs: number | null;
   workerStartedAt: number | null;
@@ -30,52 +34,65 @@ const COMMAND_TYPES = new Set([
   "clearMismatch", "markAlertsRead", "resetTrial", "liveSetStatus", "liveUpdate", "liveSend",
 ]);
 
-export const getDesk = createServerFn({ method: "GET" }).handler(async (): Promise<DeskView> => {
-  const { readSnapshot, HEARTBEAT_STALE_MS } = await import("./desk-io.ts");
-  const sess = await import("../accounts/session.server.ts");
-  const { summarize, evaluateGate, powerNote, calibrationNote, DEFAULT_GATE } = await import("./trial.ts");
-  const { STARTING_CASH } = await import("./engine.ts");
-  const { liveEnv } = await import("./live.ts");
-  const now = Date.now();
-  const user = await sess.currentUser();
-  const env = { ...liveEnv(), hasOwnerToken: true };
-  const snap = user ? await readSnapshot(sess.accounts().userDir(user.id)) : null;
-  if (!snap) {
-    return {
-      alive: false, heartbeatAgeMs: null, workerStartedAt: null, tapeAt: 0, quotesAt: 0, feedError: null,
-      lastCommandNote: null, core: null, trial: null, liveEnv: env, signedIn: Boolean(user), now,
-    };
-  }
-  const age = snap.heartbeat > 0 ? now - snap.heartbeat : null;
-  const summary = summarize(snap.core, now, STARTING_CASH);
-  const gate = evaluateGate(summary, snap.core.risk.drawdownLimit, DEFAULT_GATE);
-  const trimmed: DeskCore = {
-    ...snap.core,
-    scores: [],
-    hist: Object.fromEntries(Object.entries(snap.core.hist ?? {}).map(([k, v]) => [k, v.slice(-150)])),
-    curve: snap.core.curve.slice(-600),
-    audit: snap.core.audit.slice(0, 120),
-    signals: snap.core.signals.slice(0, 60),
-    orders: snap.core.orders.slice(0, 60),
-    fills: snap.core.fills.slice(0, 60),
-    positions: snap.core.positions.slice(0, 80),
-    spots: snap.core.spots.slice(-120),
-  };
-  return {
-    alive: age != null && age < HEARTBEAT_STALE_MS,
-    heartbeatAgeMs: age,
-    workerStartedAt: snap.workerStartedAt,
-    tapeAt: snap.tapeAt,
-    quotesAt: snap.quotesAt,
-    feedError: snap.feedError,
-    lastCommandNote: snap.lastCommandNote,
-    core: trimmed,
-    trial: { summary, checks: gate.checks, eligible: gate.eligible, power: powerNote(summary), calibration: calibrationNote(summary), recent: snap.core.scores.slice(0, 40) },
-    liveEnv: snap.liveEnv,
-    signedIn: true,
-    now,
-  };
-});
+/** The parsed, trimmed and summarised view of one snapshot version, so a poll between worker writes costs almost nothing. */
+const viewCache = new Map<string, { rev: string; parts: Pick<DeskView, "workerStartedAt" | "tapeAt" | "quotesAt" | "feedError" | "lastCommandNote" | "core" | "trial" | "liveEnv"> }>();
+
+export const getDesk = createServerFn({ method: "GET" })
+  .validator((input: { since?: string } | undefined) => ({ since: typeof input?.since === "string" ? input.since : undefined }))
+  .handler(async ({ data }): Promise<DeskView> => {
+    const { readSnapshotCached, HEARTBEAT_STALE_MS } = await import("./desk-io.ts");
+    const sess = await import("../accounts/session.server.ts");
+    const { summarize, evaluateGate, powerNote, calibrationNote, DEFAULT_GATE } = await import("./trial.ts");
+    const { STARTING_CASH } = await import("./engine.ts");
+    const { liveEnv } = await import("./live.ts");
+    const now = Date.now();
+    const user = await sess.currentUser();
+    const env = { ...liveEnv(), hasOwnerToken: true };
+    const dir = user ? sess.accounts().userDir(user.id) : null;
+    const hit = dir ? await readSnapshotCached(dir) : null;
+    if (!hit || !dir) {
+      return {
+        alive: false, heartbeatAgeMs: null, workerStartedAt: null, tapeAt: 0, quotesAt: 0, feedError: null,
+        lastCommandNote: null, core: null, trial: null, liveEnv: env, signedIn: Boolean(user), now,
+      };
+    }
+    const { snap, rev } = hit;
+    const age = snap.heartbeat > 0 ? now - snap.heartbeat : null;
+    const alive = age != null && age < HEARTBEAT_STALE_MS;
+    if (data.since && data.since === rev) {
+      return {
+        rev, unchanged: true, alive, heartbeatAgeMs: age, workerStartedAt: snap.workerStartedAt, tapeAt: snap.tapeAt, quotesAt: snap.quotesAt,
+        feedError: snap.feedError, lastCommandNote: snap.lastCommandNote, core: null, trial: null, liveEnv: snap.liveEnv, signedIn: true, now,
+      };
+    }
+    let cached = viewCache.get(dir);
+    if (!cached || cached.rev !== rev) {
+      const summary = summarize(snap.core, now, STARTING_CASH);
+      const gate = evaluateGate(summary, snap.core.risk.drawdownLimit, DEFAULT_GATE);
+      const trimmed: DeskCore = {
+        ...snap.core,
+        scores: [],
+        hist: Object.fromEntries(Object.entries(snap.core.hist ?? {}).map(([k, v]) => [k, v.slice(-150)])),
+        curve: snap.core.curve.slice(-600),
+        audit: snap.core.audit.slice(0, 120),
+        signals: snap.core.signals.slice(0, 60),
+        orders: snap.core.orders.slice(0, 60),
+        fills: snap.core.fills.slice(0, 60),
+        positions: snap.core.positions.slice(0, 200),
+        spots: snap.core.spots.slice(-120),
+      };
+      cached = {
+        rev,
+        parts: {
+          workerStartedAt: snap.workerStartedAt, tapeAt: snap.tapeAt, quotesAt: snap.quotesAt, feedError: snap.feedError,
+          lastCommandNote: snap.lastCommandNote, core: trimmed, liveEnv: snap.liveEnv,
+          trial: { summary, checks: gate.checks, eligible: gate.eligible, power: powerNote(summary), calibration: calibrationNote(summary), recent: snap.core.scores.slice(0, 200) },
+        },
+      };
+      viewCache.set(dir, cached);
+    }
+    return { rev, alive, heartbeatAgeMs: age, ...cached.parts, signedIn: true, now };
+  });
 
 export const sendCommand = createServerFn({ method: "POST" })
   .validator((input: { cmd: DeskCommand }) => input)

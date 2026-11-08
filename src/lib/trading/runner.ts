@@ -22,7 +22,8 @@ import { DEFAULT_GATE, evaluateGate, summarize } from "./trial.ts";
 import { STARTING_CASH } from "./engine.ts";
 import type { TapePayload } from "./tape-fetch.ts";
 import { lastOpenError } from "./tape-fetch.ts";
-import type { ContextSnapshot, DeskCommand, DeskCore, LiveBook, Market, Signal } from "./types.ts";
+import type { BookQuote } from "./book-feed.ts";
+import type { ContextSnapshot, DeskCommand, DeskCore, FeedGuard, LiveBook, Market, Signal } from "./types.ts";
 
 export const WORKER_VERSION = "helios-worker-1";
 
@@ -34,7 +35,14 @@ export interface RunnerDeps {
   fetchResolutions: (gammaIds: string[]) => Promise<Record<string, boolean>>;
   fetchSpotAt: (ts: number) => Promise<number | null>;
   /** optional live websocket price; when present and fresh it replaces the 6-second REST print */
-  liveSpot?: () => { price: number; at: number } | null;
+  liveSpot?: () => { price: number; at: number; source?: string } | null;
+  /** the feed's own recorded BTC price at a past instant (window opens); null when it has no record */
+  spotAt?: (ts: number) => number | null;
+  /** extra safety facts from the live feed (price 15s ago, how far apart the venues are) */
+  feedGuard?: (now: number) => FeedGuard | null;
+  /** Polymarket order-book websocket: tell it which YES tokens matter, read quotes back (null = not healthy, use REST) */
+  watchBook?: (tokenIds: string[]) => void;
+  bookQuotes?: (tokenIds: string[]) => BookQuote[] | null;
   loadContext: () => Promise<ContextSnapshot>;
   getSdk: () => Promise<ClobSdk>;
   liveEnv: () => LiveEnv;
@@ -193,33 +201,39 @@ export class DeskRunner {
           if (t - tried < 30_000) continue;
           this.openTried.set(m.id, t);
           // Our own recorded prints are the best source when the window opened while the worker was running.
+          // Best first: the live feed's own recording (exact to ~1s), then our REST prints, then a candle lookup.
+          const fromFeed = d.spotAt?.(m.startAt) ?? null;
           const near = this.spotLog.reduce<[number, number] | null>(
             (best, r) => (Math.abs(r[0] - m.startAt) <= 8_000 && (!best || Math.abs(r[0] - m.startAt) < Math.abs(best[0] - m.startAt)) ? r : best),
             null,
           );
-          const open = near ? near[1] : await d.fetchSpotAt(m.startAt);
+          const open = fromFeed ?? (near ? near[1] : await d.fetchSpotAt(m.startAt));
           if (open == null) {
             this.openFails += 1;
             this.meta.feedError = `Cannot load the BTC price at window open. ${lastOpenError}`;
           } else {
             this.openFails = 0;
           }
-          if (open != null) {
-            this.opens.set(m.id, open);
-            this.core = {
-              ...this.core,
-              liveMarkets: this.core.liveMarkets.map((x) => (x.id === m.id ? { ...x, openSpot: open, metadataOk: x.metadataOk || !x.restricted } : x)),
-            };
-          }
+          if (open != null) this.setOpen(m.id, open);
         }
       });
     }
 
-    if (now - this.lastQuotes > 2_500) {
+    // Polymarket order book: the websocket first (a quote lands the moment the book changes), REST only as the fallback
+    // for tokens the socket has not produced a quote for, or when the socket is down.
+    const bookIds = this.core.liveMarkets.filter((m) => m.status === "open").map((m) => m.yesTokenId).filter((x): x is string => Boolean(x));
+    d.watchBook?.(bookIds);
+    const wsQuotes = d.bookQuotes && bookIds.length ? d.bookQuotes(bookIds) : null;
+    if (wsQuotes && wsQuotes.length) {
+      this.core = applyQuotes(this.core, wsQuotes, now);
+      this.meta.quotesAt = now;
+    }
+    const covered = wsQuotes != null && bookIds.every((id) => wsQuotes.some((q) => q.tokenId === id));
+    this.bookViaSocket = covered;
+    if (!covered && bookIds.length > 0 && now - this.lastQuotes > 2_500) {
       this.lastQuotes = now;
       this.once("quotes", async () => {
-        const ids = this.core.liveMarkets.filter((m) => m.status === "open").map((m) => m.yesTokenId).filter((x): x is string => Boolean(x));
-        const q = await d.fetchQuotes(ids);
+        const q = await d.fetchQuotes(bookIds);
         if (q.length) {
           this.core = applyQuotes(this.core, q, d.now());
           this.meta.quotesAt = d.now();
@@ -294,6 +308,16 @@ export class DeskRunner {
     const cmds = await d.drainCommands();
     for (const cmd of cmds) await this.apply(cmd);
 
+    // Window opens from the feed's own recording: it is the price the desk trades on, it is exact to about a second, and
+    // it needs no candle lookup, so a window never sits in "waiting for the open price".
+    if (d.spotAt) {
+      for (const m of this.core.liveMarkets) {
+        if (m.openSpot != null || !/up or down/i.test(m.question) || m.startAt > now || now - m.startAt > 20 * 60_000) continue;
+        const px = d.spotAt(m.startAt);
+        if (px != null && px > 0) this.setOpen(m.id, px);
+      }
+    }
+
     // tick. A live websocket print (under 3s old) is the price we trade on; the REST print is the fallback.
     const wsPrint = d.liveSpot?.() ?? null;
     const wsAge = wsPrint ? now - wsPrint.at : Infinity;
@@ -306,7 +330,7 @@ export class DeskRunner {
     let spotAgeMs = Math.max(0, now - this.restSpotAt) + 800;
     if (useWs && wsPrint) {
       spot = wsPrint.price;
-      spotSource = "Coinbase websocket BTC-USD";
+      spotSource = wsPrint.source ?? "Coinbase websocket BTC-USD";
       spotAgeMs = wsAge + 200;
       // the volatility sample keeps its 6-second cadence so the vol estimate means the same thing as before
       spotFresh = now - this.wsSampledAt >= 6_000;
@@ -318,12 +342,14 @@ export class DeskRunner {
         this.spotLog = [...this.spotLog, [now, wsPrint.price] as [number, number]].filter((r) => now - r[0] < 6 * 3_600_000).slice(-6000);
       }
     }
+    const feedGuard = useWs ? (d.feedGuard?.(now) ?? null) : null;
     this.core = tickCore(this.core, {
       now,
       spot,
       spotSource,
       spotFresh,
       spotAgeMs,
+      feed: feedGuard,
       spotDtMs: 6_000,
       resolutions: this.resolutions,
       sim: process.env.HELIOS_SIM_WINDOWS === "1",
@@ -348,6 +374,17 @@ export class DeskRunner {
   }
 
   private pendingSpot: { spot: number; source: string } | null = null;
+  /** true while every open market's quote comes from the order-book websocket (shown in the UI) */
+  bookViaSocket = false;
+
+  /** Record a window's open price and let the market trade. */
+  private setOpen(id: string, open: number) {
+    this.opens.set(id, open);
+    this.core = {
+      ...this.core,
+      liveMarkets: this.core.liveMarkets.map((x) => (x.id === id ? { ...x, openSpot: open, metadataOk: x.metadataOk || !x.restricted } : x)),
+    };
+  }
 
   private eligible() {
     const s = summarize(this.core, this.deps.now(), STARTING_CASH);
