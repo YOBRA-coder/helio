@@ -24,6 +24,8 @@ export interface RiskConfig {
   freshnessMs: number;
   cancelOnKill: boolean;
   uncertaintyHaircut: number;
+  /** how readily the closer strategy trades: selective (fewest, safest) · balanced · active (most trades) */
+  pace?: "selective" | "balanced" | "active";
 }
 
 export interface Market {

@@ -222,3 +222,42 @@ export function BlockBreakdown({ reasons }: { reasons: Array<string | null> }) {
     </div>
   );
 }
+
+
+/** Which price feeds are really live, and whether the worker process is the new build. */
+export function FeedHealth() {
+  const version = useDesk((s) => s.workerVersion);
+  const health = useDesk((s) => s.health);
+  const alive = useDesk((s) => s.workerAlive);
+  const feedError = useDesk((s) => s.liveError);
+  const old = alive && version !== "helios-worker-2";
+  const live = health?.venues.filter((v) => v.used).length ?? 0;
+  return (
+    <Panel title="Feed health" action={<Pill tone={!alive ? "bad" : old || live === 0 ? "bad" : "good"}>{!alive ? "Worker offline" : old ? "Old worker" : live === 0 ? "No price feed" : `${live} venue${live === 1 ? "" : "s"} live`}</Pill>}>
+      {old && (
+        <p className="mb-3 rounded-md border border-danger bg-danger-soft p-3 text-sm">
+          The worker process is still the old build ({version ?? "unknown"}). The new feeds and trading logic only run after you restart it: <span className="font-mono">systemctl restart helio-worker</span> (or however you run it), then reload this page.
+        </p>
+      )}
+      {alive && !old && live === 0 && (
+        <p className="mb-3 rounded-md border border-danger bg-danger-soft p-3 text-sm">No BTC price venue is delivering. Check the VPS can reach Coinbase, Binance and Kraken websockets (outbound 443).</p>
+      )}
+      <ul className="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-4">
+        {(health?.venues ?? []).map((v) => (
+          <li key={v.name} className="rounded-md border border-line bg-raised p-3">
+            <span className="font-medium">{v.name}</span>{" "}
+            <span className={v.used ? "text-primary" : "text-danger"}>{v.used ? "live" : v.state}</span>
+            <p className="font-mono text-xs text-muted">{v.ageMs == null ? "no price yet" : `last price ${(v.ageMs / 1000).toFixed(1)}s ago`}</p>
+          </li>
+        ))}
+        <li className="rounded-md border border-line bg-raised p-3">
+          <span className="font-medium">Polymarket book</span>{" "}
+          <span className={health?.book?.state === "live" ? "text-primary" : "text-danger"}>{health?.book?.state ?? "rest only"}</span>
+          <p className="font-mono text-xs text-muted">{health?.book ? `${health.book.quotes}/${health.book.tokens} windows priced` : "polling"}</p>
+        </li>
+      </ul>
+      {feedError && <p className="mt-3 text-xs text-muted">Last feed error: {feedError}</p>}
+      <p className="mt-2 text-xs text-muted">Worker {version ?? "unknown"}.</p>
+    </Panel>
+  );
+}

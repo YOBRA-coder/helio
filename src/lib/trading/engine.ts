@@ -66,6 +66,7 @@ export const DEFAULT_RISK: RiskConfig = {
   freshnessMs: 45_000,
   cancelOnKill: true,
   uncertaintyHaircut: 0.35,
+  pace: "balanced",
 };
 
 export const THEMES: Array<{ id: ThemeId; name: string; line: string; color: string }> = [
@@ -233,6 +234,17 @@ export const CLOSER = {
   priceHi: 0.97,
   maxEdge: 0.15,
 };
+
+export type Pace = "selective" | "balanced" | "active";
+/** The closer's gates per pace. Guards (snap-back, venue spread, loss streak, exposure, daily loss) apply at every pace. */
+export const PACES: Record<Pace, typeof CLOSER> = {
+  selective: CLOSER,
+  balanced: { ...CLOSER, zoneFraction: 0.5, zoneMaxMs: 25 * 60_000, minZ: 0.75, minEdge: 0.015, priceLo: 0.5 },
+  active: { ...CLOSER, zoneFraction: 0.65, zoneMaxMs: 40 * 60_000, minZ: 0.5, minEdge: 0.01, priceLo: 0.45 },
+};
+export function closerParams(pace?: string | null): typeof CLOSER {
+  return PACES[(pace as Pace) in PACES ? (pace as Pace) : "balanced"];
+}
 
 /** Refuse an entry when BTC moved this many sd (of the time left) against it in the last 15s. */
 export const SNAPBACK_SD = 0.35;
@@ -574,14 +586,15 @@ export function evaluateCloser(
   if (Math.abs(read.p - mid) > 0.25) {
     blocks.push(`Model (${Math.round(read.p * 100)}%) and market (${Math.round(mid * 100)}%) disagree by over 25 points: treated as a data problem, not an edge`);
   }
+  const C = closerParams(risk.pace);
   const len = market.endAt - market.startAt;
-  const zone = clamp(len * CLOSER.zoneFraction, CLOSER.zoneMinMs, CLOSER.zoneMaxMs);
+  const zone = clamp(len * C.zoneFraction, C.zoneMinMs, C.zoneMaxMs);
   const left = market.endAt - now;
   if (left > zone) {
     blocks.push(`Too early: this strategy only acts in the last ${Math.round(zone / 1000)}s of a window, when the outcome is largely decided`);
   }
   const streak = clamp(Math.round(extra.lossStreak ?? 0), 0, 3);
-  const needZ = CLOSER.minZ + LOSS_Z_STEP * streak;
+  const needZ = C.minZ + LOSS_Z_STEP * streak;
   if (Math.abs(read.z) < needZ) {
     blocks.push(
       `Not decided yet: BTC is ${Math.abs(read.z).toFixed(2)} standard deviations from the open, and this strategy needs ${needZ.toFixed(1)}${streak ? ` (raised after ${streak} recent loss${streak > 1 ? "es" : ""})` : ""}`,
@@ -598,13 +611,13 @@ export function evaluateCloser(
   if (fg?.spreadBp != null && fg.spreadBp > MAX_VENUE_SPREAD_BP) {
     blocks.push(`Exchanges disagree on the BTC price by ${fg.spreadBp.toFixed(1)} bp: the settlement price is too uncertain`);
   }
-  const needEdge = Math.max(risk.minEdge, CLOSER.minEdge);
-  if (edge > CLOSER.maxEdge) {
-    blocks.push(`Net edge ${edge.toFixed(3)} is above ${CLOSER.maxEdge}: more likely a data problem than a real edge`);
+  const needEdge = risk.minEdge > 0.02 ? risk.minEdge : C.minEdge; // only a deliberately raised floor overrides the pace
+  if (edge > C.maxEdge) {
+    blocks.push(`Net edge ${edge.toFixed(3)} is above ${C.maxEdge}: more likely a data problem than a real edge`);
   }
   if (edge < needEdge) blocks.push(`Net edge ${edge.toFixed(3)} is below the minimum ${needEdge.toFixed(3)}`);
-  if (executablePrice < CLOSER.priceLo || executablePrice > CLOSER.priceHi) {
-    blocks.push(`Executable price is outside the ${Math.round(CLOSER.priceLo * 100)}¢–${Math.round(CLOSER.priceHi * 100)}¢ band (favourites only)`);
+  if (executablePrice < C.priceLo || executablePrice > C.priceHi) {
+    blocks.push(`Executable price is outside the ${Math.round(C.priceLo * 100)}¢–${Math.round(C.priceHi * 100)}¢ band (favourites only)`);
   }
 
   // two losses in a row halve the size (never below the minimum stake) until a win

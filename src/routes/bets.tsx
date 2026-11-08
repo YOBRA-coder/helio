@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Panel, Pill, Shell, Stat } from "@/components/widgets";
+import { Panel, Pill, Stat } from "@/components/widgets";
 import { clock, money, remain, signedMoney } from "@/lib/trading/format";
 import { overlayQuotes, useLive } from "@/lib/trading/live-store";
 import { useDesk } from "@/lib/trading/store";
@@ -42,7 +42,7 @@ function Bets() {
   const wins = settled.filter((p) => p.realized > 0).length;
 
   return (
-    <Shell>
+    <>
       <div className="space-y-6">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight">Bets</h1>
@@ -57,7 +57,7 @@ function Bets() {
 
         <Panel title={`Open bets (${open.length})`}>
           {rows.length === 0 ? (
-            <p className="text-sm text-muted">No open bets. The desk only bets when a window is clearly decided; see Analysis for what it is waiting on.</p>
+            <p className="text-sm text-muted">No open bets. The desk bets when a window is leaning clearly enough for your pace setting; see Analysis for what it is waiting on.</p>
           ) : (
             <ul className="space-y-3">
               {rows.map(({ p, mark, unreal, gap, winning }) => (
@@ -114,7 +114,7 @@ function Bets() {
           )}
         </Panel>
       </div>
-    </Shell>
+    </>
   );
 }
 

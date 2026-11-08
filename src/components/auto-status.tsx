@@ -90,25 +90,29 @@ export function AutoBanner() {
       return false;
     }
   });
-  const tone = h.state === "stalled" ? "border-danger bg-danger-soft" : h.state === "ok" ? "border-primary bg-primary-soft" : "border-line bg-surface";
+  const showLive = h.state === "ok" && h.liveAutoOff && !hideLive;
+  // Healthy paper auto needs no banner. Show it only when auto is off, stalled, or live auto is not set up yet.
+  if (h.state === "ok" && !showLive) return <AutoConfirmDialog open={dlg} onClose={() => setDlg(false)} />;
+  const tone = h.state === "stalled" ? "border-danger bg-danger-soft" : h.state === "ok" ? "border-line bg-surface" : "border-primary bg-primary-soft";
   return (
     <>
       <section className={`rounded-lg border px-4 py-3 ${tone}`} aria-label="Auto trading status">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold">{h.title}</p>
-            {h.problems.map((p) => (
-              <p key={p} className="mt-1 text-sm text-muted">{p}</p>
-            ))}
+        {h.state !== "ok" ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold">{h.title}</p>
+              {h.problems.map((p) => (
+                <p key={p} className="mt-1 text-sm text-muted">{p}</p>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {h.state === "manual" && <Button type="button" onClick={() => setDlg(true)}>Turn on auto</Button>}
+              {h.state === "stalled" && killed && <Button type="button" variant="quiet" onClick={() => setKilled(false)}>Release stop</Button>}
+              {h.state === "stalled" && <Button type="button" variant="quiet" onClick={() => setDlg(true)}>Reconnect auto</Button>}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {h.state === "manual" && <Button type="button" onClick={() => setDlg(true)}>Turn on auto</Button>}
-            {h.state === "stalled" && killed && <Button type="button" variant="quiet" onClick={() => setKilled(false)}>Release stop</Button>}
-            {h.state !== "manual" && <Button type="button" variant="quiet" onClick={() => setDlg(true)}>Reconnect auto</Button>}
-          </div>
-        </div>
-        {h.state !== "manual" && h.liveAutoOff && !hideLive && (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 text-sm">
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="text-muted">Paper auto is running. Live auto (real orders) is not connected.</span>
             <span className="flex gap-2">
               <Link to="/live" className="font-semibold text-primary">Set up live auto</Link>

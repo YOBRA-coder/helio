@@ -157,6 +157,10 @@ export class Hub {
             feedError: meta.feedError,
             liveEnv: e,
             lastCommandNote: meta.lastCommandNote,
+            health: {
+              venues: (this.feed?.status().venues ?? []).map((v) => ({ name: v.name, state: v.state, used: v.used, ageMs: v.lastTickAt ? this.now() - v.lastTickAt : null })),
+              book: this.book ? (({ state, tokens, quotes }) => ({ state, tokens, quotes }))(this.book.status()) : null,
+            },
           });
         },
         journal: (rows) => appendJournal(dir, rows),

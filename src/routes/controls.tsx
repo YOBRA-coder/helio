@@ -154,6 +154,8 @@ function ControlsPage() {
         </p>
       </Panel>
 
+      <PacePanel />
+
       <Panel title="Risk limits">
         <LimitsForm />
       </Panel>
@@ -360,5 +362,36 @@ function NumberField({ field, value, saved, onChange }: { field: Field; value: n
       {/* the slider only moves the draft: it sends nothing, and it never changes a number on its own */}
       <input className="mt-2 w-full touch-pan-y" type="range" min={field.min} max={field.max} step={field.step} value={clampShown(shown)} onChange={(e) => set(Number(e.target.value))} aria-label={`${field.label} slider`} />
     </div>
+  );
+}
+
+
+const PACE_OPTIONS: Array<{ id: "selective" | "balanced" | "active"; name: string; text: string }> = [
+  { id: "selective", name: "Selective", text: "Acts only in the last 40% of a window and only when BTC is 1.0 sd from the open. Fewest trades, highest hit rate. Can go hours without a bet." },
+  { id: "balanced", name: "Balanced", text: "Acts in the last half of a window from 0.75 sd and 1.5¢ edge. A steady flow of trades with the loss guards on." },
+  { id: "active", name: "Active", text: "Acts earlier (last 65%) from 0.5 sd and 1¢ edge, prices from 45¢. Most trades, more variance. Use with small stakes." },
+];
+
+function PacePanel() {
+  const pace = useDesk((s) => s.risk.pace) ?? "balanced";
+  const updateRisk = useDesk((s) => s.updateRisk);
+  return (
+    <Panel title="Trading pace">
+      <p className="text-sm text-muted">How readily the bot takes a trade. Every pace keeps the loss guards, the loss-streak slowdown, exposure and daily-loss limits.</p>
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
+        {PACE_OPTIONS.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            aria-pressed={pace === o.id}
+            onClick={() => updateRisk({ pace: o.id })}
+            className={`rounded-md border p-3 text-left ${pace === o.id ? "border-primary bg-primary-soft" : "border-line bg-raised"}`}
+          >
+            <span className="text-sm font-semibold">{o.name}</span>
+            <span className="mt-1 block text-xs text-muted">{o.text}</span>
+          </button>
+        ))}
+      </div>
+    </Panel>
   );
 }

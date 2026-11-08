@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
-import { BlockBreakdown, LiveTape, WindowRadar } from "@/components/analysis";
+import { BlockBreakdown, FeedHealth, LiveTape, WindowRadar } from "@/components/analysis";
 import { EdgeResultChart, PriceBucketChart } from "@/components/charts";
-import { Panel, Shell, Stat } from "@/components/widgets";
+import { Panel, Stat } from "@/components/widgets";
 import { pct, signedMoney } from "@/lib/trading/format";
 import { useDesk } from "@/lib/trading/store";
 
@@ -27,12 +27,13 @@ function Analysis() {
   );
   const reasons = useMemo(() => signals.filter((s) => s.status === "blocked").map((s) => s.rejectedReason ?? null), [signals]);
   return (
-    <Shell>
+    <>
       <div className="space-y-6">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight">Analysis</h1>
           <p className="text-sm text-muted">Live prices, where each window stands against the gates, and how the settled trades are really doing.</p>
         </header>
+        <FeedHealth />
         <LiveTape recent={recent} />
         <WindowRadar recent={recent} />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -55,6 +56,6 @@ function Analysis() {
           <BlockBreakdown reasons={reasons} />
         </Panel>
       </div>
-    </Shell>
+    </>
   );
 }

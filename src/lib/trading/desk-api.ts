@@ -15,6 +15,8 @@ export interface DeskView {
   quotesAt: number;
   feedError: string | null;
   lastCommandNote: string | null;
+  workerVersion?: string | null;
+  health?: import("./desk-io.ts").WorkerHealth | null;
   core: DeskCore | null;
   trial: {
     summary: TrialSummary;
@@ -35,7 +37,7 @@ const COMMAND_TYPES = new Set([
 ]);
 
 /** The parsed, trimmed and summarised view of one snapshot version, so a poll between worker writes costs almost nothing. */
-const viewCache = new Map<string, { rev: string; parts: Pick<DeskView, "workerStartedAt" | "tapeAt" | "quotesAt" | "feedError" | "lastCommandNote" | "core" | "trial" | "liveEnv"> }>();
+const viewCache = new Map<string, { rev: string; parts: Pick<DeskView, "workerVersion" | "health" | "workerStartedAt" | "tapeAt" | "quotesAt" | "feedError" | "lastCommandNote" | "core" | "trial" | "liveEnv"> }>();
 
 export const getDesk = createServerFn({ method: "GET" })
   .validator((input: { since?: string } | undefined) => ({ since: typeof input?.since === "string" ? input.since : undefined }))
@@ -62,7 +64,7 @@ export const getDesk = createServerFn({ method: "GET" })
     if (data.since && data.since === rev) {
       return {
         rev, unchanged: true, alive, heartbeatAgeMs: age, workerStartedAt: snap.workerStartedAt, tapeAt: snap.tapeAt, quotesAt: snap.quotesAt,
-        feedError: snap.feedError, lastCommandNote: snap.lastCommandNote, core: null, trial: null, liveEnv: snap.liveEnv, signedIn: true, now,
+        feedError: snap.feedError, lastCommandNote: snap.lastCommandNote, workerVersion: snap.workerVersion, health: snap.health ?? null, core: null, trial: null, liveEnv: snap.liveEnv, signedIn: true, now,
       };
     }
     let cached = viewCache.get(dir);
@@ -84,6 +86,7 @@ export const getDesk = createServerFn({ method: "GET" })
       cached = {
         rev,
         parts: {
+          workerVersion: snap.workerVersion, health: snap.health ?? null,
           workerStartedAt: snap.workerStartedAt, tapeAt: snap.tapeAt, quotesAt: snap.quotesAt, feedError: snap.feedError,
           lastCommandNote: snap.lastCommandNote, core: trimmed, liveEnv: snap.liveEnv,
           trial: { summary, checks: gate.checks, eligible: gate.eligible, power: powerNote(summary), calibration: calibrationNote(summary), recent: snap.core.scores.slice(0, 200) },

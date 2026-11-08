@@ -25,7 +25,7 @@ import { lastOpenError } from "./tape-fetch.ts";
 import type { BookQuote } from "./book-feed.ts";
 import type { ContextSnapshot, DeskCommand, DeskCore, FeedGuard, LiveBook, Market, Signal } from "./types.ts";
 
-export const WORKER_VERSION = "helios-worker-1";
+export const WORKER_VERSION = "helios-worker-2";
 
 
 export interface RunnerDeps {

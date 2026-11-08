@@ -285,6 +285,7 @@ export function sanitizeRisk(risk: RiskConfig): RiskConfig {
     freshnessMs: clampNum(risk.freshnessMs, 5_000, 120_000),
     cancelOnKill: Boolean(risk.cancelOnKill),
     uncertaintyHaircut: clampNum(risk.uncertaintyHaircut, 0, 1),
+    pace: risk.pace === "selective" || risk.pace === "active" ? risk.pace : "balanced",
   };
 }
 

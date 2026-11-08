@@ -2,7 +2,7 @@
  * The watch-list: for every open window, where it stands against the strategy's gates right now.
  * It calls the same evaluator the worker trades with, so what the screen says is what the engine would do.
  */
-import { CLOSER, LOSS_Z_STEP, clamp, closerRead, evaluateOpportunity } from "./engine.ts";
+import { LOSS_Z_STEP, clamp, closerParams, closerRead, evaluateOpportunity } from "./engine.ts";
 import { classifyBlock, type BlockKind } from "./blocks.ts";
 import type { FeedGuard, Market, RiskConfig, Side } from "./types.ts";
 
@@ -58,8 +58,9 @@ export function radarRow(m: Market, x: RadarInput): RadarRow {
   const isUpDown = /up or down/i.test(m.question);
   const secLeft = Math.max(0, (m.endAt - x.now) / 1000);
   const len = m.endAt - m.startAt;
-  const zoneSec = clamp(len * CLOSER.zoneFraction, CLOSER.zoneMinMs, CLOSER.zoneMaxMs) / 1000;
-  const needZ = CLOSER.minZ + LOSS_Z_STEP * clamp(Math.round(x.lossStreak ?? 0), 0, 3);
+  const C = closerParams(x.risk.pace);
+  const zoneSec = clamp(len * C.zoneFraction, C.zoneMinMs, C.zoneMaxMs) / 1000;
+  const needZ = C.minZ + LOSS_Z_STEP * clamp(Math.round(x.lossStreak ?? 0), 0, 3);
   const mid = (m.yesBid + m.yesAsk) / 2;
   const opp = evaluateOpportunity(m, x.spot, x.now, x.risk, x.cash, x.exposure, x.ordersLastHour, x.killed, x.circuit, {
     vol: x.vol,
@@ -97,7 +98,7 @@ export function radarRow(m: Market, x: RadarInput): RadarRow {
     mid,
     pModel: opp.yesProbability,
     edge: opp.edge,
-    needEdge: Math.max(x.risk.minEdge, CLOSER.minEdge),
+    needEdge: (x.risk.minEdge > 0.02 ? x.risk.minEdge : C.minEdge),
     price: opp.executablePrice,
     stake: opp.stake,
     reason: opp.hardFail,

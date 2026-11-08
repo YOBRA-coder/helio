@@ -23,6 +23,12 @@ export interface Snapshot {
   feedError: string | null;
   liveEnv: { enabled: boolean; hasKey: boolean; hasFunder: boolean; hasOwnerToken: boolean };
   lastCommandNote: string | null;
+  health?: WorkerHealth;
+}
+
+export interface WorkerHealth {
+  venues: Array<{ name: string; state: string; used: boolean; ageMs: number | null }>;
+  book: { state: string; tokens: number; quotes: number } | null;
 }
 
 export async function writeAtomic(path: string, data: string) {

@@ -1,4 +1,4 @@
-import { WindowRadar } from "@/components/analysis";
+import { FeedHealth, WindowRadar } from "@/components/analysis";
 import { classifyBlock } from "@/lib/trading/blocks";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
@@ -84,6 +84,7 @@ function SignalsPage() {
           </button>
         ))}
       </div>
+      <FeedHealth />
       <WindowRadar recent={liveScores} />
       {reasons.length > 0 && (
         <div className="rounded-lg border border-line bg-surface p-4">

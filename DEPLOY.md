@@ -148,3 +148,9 @@ Controls shows each limit's live usage and what blocks a signal. The two that mo
 - Polymarket bids/asks stream from the public order-book websocket (`HELIOS_BOOK_WS=0` falls back to REST).
 - If your VPS region blocks Binance, the worker automatically uses the other venues; check the heartbeat log for per-venue status.
 - Pages poll every 2s while visible and 10s when the tab is hidden; unchanged snapshots return a tiny response.
+
+## After every update: restart BOTH processes
+
+The web app and the worker are separate. The worker is what trades and records prices, so after `git pull`/unzip run `npm install && npm run build`, then restart the web service **and** the worker (`systemctl restart helio-web helio-worker`, or your own unit names). The Analysis and Signals pages show a "Feed health" card that says "Old worker" if the worker is still on an old build.
+
+Trading pace (Limits page): Selective / Balanced (default) / Active. Balanced acts from 0.75 sd in the last half of a window; Selective is the original strict behaviour.

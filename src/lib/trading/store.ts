@@ -18,6 +18,8 @@ export interface DeskState extends DeskCore {
   now: number;
   source: DeskSource;
   workerAlive: boolean;
+  workerVersion: string | null;
+  health: import("./desk-io.ts").WorkerHealth | null;
   heartbeatAgeMs: number | null;
   commandNote: string | null;
   liveStatus: "idle" | "loading" | "ok" | "error";
@@ -108,6 +110,8 @@ export const useDesk = create<DeskState>((set, get) => ({
   now: 0,
   source: "connecting",
   workerAlive: false,
+  workerVersion: null,
+  health: null,
   heartbeatAgeMs: null,
   commandNote: null,
   liveStatus: "idle",
@@ -146,6 +150,8 @@ export const useDesk = create<DeskState>((set, get) => ({
         set({
           source: view.alive ? "server" : "server-offline",
           workerAlive: view.alive,
+          workerVersion: view.workerVersion ?? null,
+          health: view.health ?? null,
           heartbeatAgeMs: view.heartbeatAgeMs,
           commandNote: view.lastCommandNote,
           now: view.now,
@@ -168,6 +174,8 @@ export const useDesk = create<DeskState>((set, get) => ({
           ...(hold?.killed != null ? { killed: hold.killed } : {}),
           source: alive ? "server" : "server-offline",
           workerAlive: alive,
+          workerVersion: view.workerVersion ?? null,
+          health: view.health ?? null,
           heartbeatAgeMs: view.heartbeatAgeMs,
           commandNote: view.lastCommandNote,
           trial: view.trial,

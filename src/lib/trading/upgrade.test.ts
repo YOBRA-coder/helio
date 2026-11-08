@@ -225,3 +225,11 @@ test("when the book socket is unhealthy the REST poll takes over", async () => {
   assert.ok(h.calls.rest >= 1, "REST fallback is used");
   assert.equal(h.r.bookViaSocket, false);
 });
+
+test("pace: balanced acts at 0.75 sd where selective waits", async () => {
+  const { closerParams, PACES } = await import("./engine.ts");
+  assert.ok(closerParams("balanced").minZ < closerParams("selective").minZ);
+  assert.ok(closerParams("active").minZ < closerParams("balanced").minZ);
+  assert.equal(closerParams(undefined), PACES.balanced);
+  assert.equal(closerParams("nonsense"), PACES.balanced);
+});
