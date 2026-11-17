@@ -18,6 +18,8 @@ export interface DeskState extends DeskCore {
   now: number;
   source: DeskSource;
   workerAlive: boolean;
+  workerVersion: string | null;
+  health: import("./desk-io.ts").WorkerHealth | null;
   heartbeatAgeMs: number | null;
   commandNote: string | null;
   liveStatus: "idle" | "loading" | "ok" | "error";
@@ -32,6 +34,8 @@ export interface DeskState extends DeskCore {
   setEmail: (e: string | null) => void;
   boot: () => void;
   syncServer: () => Promise<void>;
+  /** advance `now` by the browser clock (server mode only changes `now` every poll otherwise) */
+  tickClock: () => void;
   tick: () => void;
   refreshLive: () => Promise<void>;
   applyLiveQuotes: (quotes: LiveQuote[]) => void;
@@ -85,6 +89,12 @@ function writeLocal(core: DeskCore) {
 }
 
 let pending: { risk?: Partial<RiskConfig>; mode?: Mode; gateBasis?: BrierBasis; killed?: boolean; at: number } | null = null;
+/** version of the last desk snapshot we downloaded; sent back so an unchanged snapshot is not downloaded again */
+let lastRev: string | undefined;
+/** server clock minus this browser's clock, so countdowns can tick every second between polls */
+let clockSkew = 0;
+/** how long a just-changed setting stays on screen while the worker catches up (it applies commands within ~1s, saves within ~5s) */
+const HOLD_MS = 30_000;
 
 function localTrial(core: DeskCore, now: number): DeskState["trial"] {
   const summary = summarize(core, now, STARTING_CASH);
@@ -101,6 +111,8 @@ export const useDesk = create<DeskState>((set, get) => ({
   now: 0,
   source: "connecting",
   workerAlive: false,
+  workerVersion: null,
+  health: null,
   heartbeatAgeMs: null,
   commandNote: null,
   liveStatus: "idle",
@@ -132,11 +144,28 @@ export const useDesk = create<DeskState>((set, get) => ({
 
   syncServer: async () => {
     try {
-      const view = await getDesk();
+      const view = await getDesk({ data: { since: lastRev } });
+      if (view.now) clockSkew = view.now - Date.now();
+      if (view.unchanged) {
+        // the worker has not saved since the last poll: refresh only what changes between saves
+        set({
+          source: view.alive ? "server" : "server-offline",
+          workerAlive: view.alive,
+          workerVersion: view.workerVersion ?? null,
+          health: view.health ?? null,
+          heartbeatAgeMs: view.heartbeatAgeMs,
+          commandNote: view.lastCommandNote,
+          now: view.now,
+          liveFetchedAt: view.tapeAt,
+          bookStatus: view.quotesAt && view.now - view.quotesAt < 10_000 ? "live" : view.alive ? "connecting" : "down",
+        });
+        return;
+      }
+      lastRev = view.rev;
       if (view.core) {
         const alive = view.alive;
         // keep a just-changed setting on screen until the worker has applied it
-        const hold = pending && Date.now() - pending.at < 6000 ? pending : null;
+        const hold = pending && Date.now() - pending.at < HOLD_MS ? pending : null;
         if (pending && !hold) pending = null;
         if (hold?.risk && Object.entries(hold.risk).every(([k, v]) => (view.core!.risk as unknown as Record<string, unknown>)[k] === v)) pending = null;
         set({
@@ -147,6 +176,8 @@ export const useDesk = create<DeskState>((set, get) => ({
           ...(hold?.killed != null ? { killed: hold.killed } : {}),
           source: alive ? "server" : "server-offline",
           workerAlive: alive,
+          workerVersion: view.workerVersion ?? null,
+          health: view.health ?? null,
           heartbeatAgeMs: view.heartbeatAgeMs,
           commandNote: view.lastCommandNote,
           trial: view.trial,
@@ -165,6 +196,12 @@ export const useDesk = create<DeskState>((set, get) => ({
     } catch {
       if (get().source === "connecting") set({ source: "local" });
     }
+  },
+
+  tickClock: () => {
+    const s = get();
+    if (!s.booted || s.source === "local" || s.source === "connecting") return;
+    set({ now: Date.now() + clockSkew });
   },
 
   tick: () => {

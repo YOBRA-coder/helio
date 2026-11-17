@@ -43,7 +43,11 @@ async function loop() {
       if (t0 - last > 60_000) {
         last = t0;
         const f = hub.feed?.status();
-        console.log(`[helios-worker] ${hub.size} desk(s) running · BTC feed: ${f ? `${f.state} (${f.detail}; ${f.ticks} ticks, ${f.reconnects} reconnects)` : "off (HELIOS_WS_FEED=0)"}`);
+        const b = hub.book?.status();
+        const venues = f?.venues?.map((v) => `${v.name} ${v.used ? "ok" : v.state}`).join(", ");
+        console.log(
+          `[helios-worker] ${hub.size} desk(s) running · BTC feed: ${f ? `${f.state} (${f.detail}${venues ? `: ${venues}` : ""}; ${f.ticks} ticks, ${f.reconnects} reconnects)` : "off (HELIOS_WS_FEED=0)"} · order book: ${b ? `${b.state} (${b.quotes} quotes, ${b.reconnects} reconnects)` : "REST (HELIOS_BOOK_WS=0)"}`,
+        );
       }
     } catch (err) {
       console.error("[helios-worker] hub step failed:", err instanceof Error ? err.message : err);

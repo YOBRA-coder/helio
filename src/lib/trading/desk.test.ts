@@ -478,9 +478,10 @@ test("a window noticed mid-way never takes the current price as its open", () =>
 });
 
 test("model far from the market (25+ points) is blocked as a data problem", () => {
-  let s = applyTape(makeCore(T0), tape(T0, 0.2), { "poly-m1": 100_000 }, T0);
+  // late in the window with BTC well clear of the open, but a market that prices the move at 20%: a data problem
+  let s = applyTape(makeCore(T0), tape(T0, 0.2, 100_000), { "poly-m1": 100_000 }, T0);
   s = { ...s, mode: "auto", risk: { ...s.risk, minEdge: 0 } };
-  for (let i = 1; i <= 40; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_000, spotFresh: true, spotDtMs: 1000, sim: false });
+  for (let i = 1; i <= 40; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_300, spotFresh: true, spotDtMs: 1000, sim: false });
   assert.ok(!s.signals.some((x) => x.kind === "live" && x.status === "executed"));
   assert.ok(s.signals.some((x) => /disagree by over 25 points/.test(x.rejectedReason ?? "")));
 });

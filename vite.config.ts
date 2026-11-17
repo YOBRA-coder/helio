@@ -176,6 +176,8 @@ export default defineConfig(({ command, isPreview }) => ({
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
+            compressPublicAssets: { gzip: true, brotli: true },
+            routeRules: { "/assets/**": { headers: { "cache-control": "public, max-age=31536000, immutable" } } },
           }),
         ]
       : []),

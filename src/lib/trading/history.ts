@@ -207,18 +207,41 @@ export async function fetchDataset(opts: FetchOpts): Promise<Dataset> {
     const starts: number[] = [];
     for (let t = Math.floor(lo / 60_000) * 60_000; t < hi; t += chunk) starts.push(t);
     let c = 0;
-    await pool(starts, 3, async (t) => {
-      try {
-        const rows = parseCandles(
-          await get(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=${encodeURIComponent(new Date(t).toISOString())}&end=${encodeURIComponent(new Date(Math.min(hi, t + chunk)).toISOString())}`, 12_000),
-        );
-        for (const r of rows) candles.set(r[0], r);
-      } catch (e) {
-        notes.push(`candles ${new Date(t).toISOString()} failed (${e instanceof Error ? e.message : "error"})`);
+    // Coinbase rate-limits bursts (HTTP 429): go one chunk at a time, back off and retry, then fall back to Binance 1m klines.
+    await pool(starts, 1, async (t) => {
+      const end = Math.min(hi, t + chunk);
+      let rows: Array<[number, number, number, number, number]> = [];
+      let lastErr = "error";
+      for (let attempt = 0; attempt < 3 && !rows.length; attempt += 1) {
+        try {
+          rows = parseCandles(
+            await get(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=${encodeURIComponent(new Date(t).toISOString())}&end=${encodeURIComponent(new Date(end).toISOString())}`, 12_000),
+          );
+        } catch (e) {
+          lastErr = e instanceof Error ? e.message : "error";
+          await sleep(600 * 2 ** attempt);
+        }
       }
+      if (!rows.length) {
+        try {
+          const k = await get(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${t}&endTime=${end}&limit=1000`, 12_000);
+          if (Array.isArray(k)) {
+            for (const r of k) {
+              if (!Array.isArray(r)) continue;
+              const [ts, o, h, l, cl] = [Number(r[0]), Number(r[1]), Number(r[2]), Number(r[3]), Number(r[4])];
+              if ([ts, o, h, l, cl].every(Number.isFinite)) rows.push([ts, o, h, l, cl]);
+            }
+          }
+          if (rows.length) notes.push(`candles from ${new Date(t).toISOString()} came from Binance (Coinbase said ${lastErr})`);
+        } catch (e) {
+          lastErr += `; Binance ${e instanceof Error ? e.message : "error"}`;
+        }
+      }
+      if (rows.length) for (const r of rows) candles.set(r[0], r);
+      else notes.push(`candles ${new Date(t).toISOString()} failed (${lastErr})`);
       c += 1;
       opts.onProgress?.("candles", c, starts.length);
-      await sleep(120);
+      await sleep(250);
     });
   }
   return {

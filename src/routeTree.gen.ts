@@ -11,7 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
+import { Route as AnalysisRouteImport } from './routes/analysis'
 import { Route as AuditRouteImport } from './routes/audit'
+import { Route as BetsRouteImport } from './routes/bets'
 import { Route as BookRouteImport } from './routes/book'
 import { Route as ControlsRouteImport } from './routes/controls'
 import { Route as LabRouteImport } from './routes/lab'
@@ -31,9 +33,19 @@ const AccountRoute = AccountRouteImport.update({
   path: '/account',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AnalysisRoute = AnalysisRouteImport.update({
+  id: '/analysis',
+  path: '/analysis',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuditRoute = AuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BetsRoute = BetsRouteImport.update({
+  id: '/bets',
+  path: '/bets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BookRoute = BookRouteImport.update({
@@ -80,7 +92,9 @@ const TrialRoute = TrialRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/analysis': typeof AnalysisRoute
   '/audit': typeof AuditRoute
+  '/bets': typeof BetsRoute
   '/book': typeof BookRoute
   '/controls': typeof ControlsRoute
   '/lab': typeof LabRoute
@@ -93,7 +107,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/analysis': typeof AnalysisRoute
   '/audit': typeof AuditRoute
+  '/bets': typeof BetsRoute
   '/book': typeof BookRoute
   '/controls': typeof ControlsRoute
   '/lab': typeof LabRoute
@@ -107,7 +123,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/analysis': typeof AnalysisRoute
   '/audit': typeof AuditRoute
+  '/bets': typeof BetsRoute
   '/book': typeof BookRoute
   '/controls': typeof ControlsRoute
   '/lab': typeof LabRoute
@@ -122,7 +140,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/account'
+    | '/analysis'
     | '/audit'
+    | '/bets'
     | '/book'
     | '/controls'
     | '/lab'
@@ -135,7 +155,9 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/account'
+    | '/analysis'
     | '/audit'
+    | '/bets'
     | '/book'
     | '/controls'
     | '/lab'
@@ -148,7 +170,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/account'
+    | '/analysis'
     | '/audit'
+    | '/bets'
     | '/book'
     | '/controls'
     | '/lab'
@@ -162,7 +186,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
+  AnalysisRoute: typeof AnalysisRoute
   AuditRoute: typeof AuditRoute
+  BetsRoute: typeof BetsRoute
   BookRoute: typeof BookRoute
   ControlsRoute: typeof ControlsRoute
   LabRoute: typeof LabRoute
@@ -189,11 +215,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/analysis': {
+      id: '/analysis'
+      path: '/analysis'
+      fullPath: '/analysis'
+      preLoaderRoute: typeof AnalysisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/audit': {
       id: '/audit'
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bets': {
+      id: '/bets'
+      path: '/bets'
+      fullPath: '/bets'
+      preLoaderRoute: typeof BetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/book': {
@@ -258,7 +298,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
+  AnalysisRoute: AnalysisRoute,
   AuditRoute: AuditRoute,
+  BetsRoute: BetsRoute,
   BookRoute: BookRoute,
   ControlsRoute: ControlsRoute,
   LabRoute: LabRoute,
