@@ -10,3 +10,17 @@ helio.yobbytech.com {
 		flush_interval -1
 	}
 }
+
+hifi.yobbytech.com {
+    encode gzip
+    reverse_proxy 127.0.0.1:3001
+}
+
+yobbyfx.yobbytech.com {
+    reverse_proxy 127.0.0.1:8085
+}
+
+portal.yobbytech.com {
+    reverse_proxy 127.0.0.1:8086
+}
+

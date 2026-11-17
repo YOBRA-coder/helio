@@ -5,7 +5,7 @@ import { getDesk, sendCommand, type DeskView } from "./desk-api.ts";
 import { fetchResolutionsFn, fetchTape } from "./tape.ts";
 import { DEFAULT_GATE, calibrationNote, evaluateGate, powerNote, summarize } from "./trial.ts";
 import type { LiveQuote } from "./book-socket.ts";
-import type { BacktestReport, DeskCommand, DeskCore, Mode, RiskConfig, ThemeId } from "./types.ts";
+import type { BacktestReport, BrierBasis, DeskCommand, DeskCore, Mode, RiskConfig, ThemeId } from "./types.ts";
 
 const STORAGE_KEY = "helios-desk-v2";
 const THEME_KEY = "helios-theme";
@@ -18,8 +18,6 @@ export interface DeskState extends DeskCore {
   now: number;
   source: DeskSource;
   workerAlive: boolean;
-  workerVersion: string | null;
-  health: import("./desk-io.ts").WorkerHealth | null;
   heartbeatAgeMs: number | null;
   commandNote: string | null;
   liveStatus: "idle" | "loading" | "ok" | "error";
@@ -34,8 +32,6 @@ export interface DeskState extends DeskCore {
   setEmail: (e: string | null) => void;
   boot: () => void;
   syncServer: () => Promise<void>;
-  /** advance `now` by the browser clock (server mode only changes `now` every poll otherwise) */
-  tickClock: () => void;
   tick: () => void;
   refreshLive: () => Promise<void>;
   applyLiveQuotes: (quotes: LiveQuote[]) => void;
@@ -44,6 +40,7 @@ export interface DeskState extends DeskCore {
   approve: (signalId: string) => void;
   reject: (signalId: string) => void;
   setMode: (mode: Mode) => void;
+  setGateBasis: (basis: BrierBasis) => void;
   setKilled: (on: boolean) => void;
   updateRisk: (partial: Partial<RiskConfig>) => void;
   setTheme: (theme: ThemeId) => void;
@@ -56,7 +53,7 @@ export interface DeskState extends DeskCore {
 }
 
 const CORE_KEYS: Array<keyof DeskCore> = [
-  "risk", "mode", "killed", "cash", "simMarkets", "liveMarkets", "signals", "orders", "fills", "positions", "alerts",
+  "risk", "mode", "gateBasis", "killed", "cash", "simMarkets", "liveMarkets", "signals", "orders", "fills", "positions", "alerts",
   "audit", "curve", "dayKey", "dayStartEquity", "peakEquity", "circuitKind", "reconcileNote", "spot", "spotSource",
   "spots", "spotDtMs", "tickCount", "scores", "blend", "hist", "context", "trialStartedAt", "live",
 ];
@@ -87,13 +84,7 @@ function writeLocal(core: DeskCore) {
   }
 }
 
-let pending: { risk?: Partial<RiskConfig>; mode?: Mode; killed?: boolean; at: number } | null = null;
-/** version of the last desk snapshot we downloaded; sent back so an unchanged snapshot is not downloaded again */
-let lastRev: string | undefined;
-/** server clock minus this browser's clock, so countdowns can tick every second between polls */
-let clockSkew = 0;
-/** how long a just-changed setting stays on screen while the worker catches up (it applies commands within ~1s, saves within ~5s) */
-const HOLD_MS = 30_000;
+let pending: { risk?: Partial<RiskConfig>; mode?: Mode; gateBasis?: BrierBasis; killed?: boolean; at: number } | null = null;
 
 function localTrial(core: DeskCore, now: number): DeskState["trial"] {
   const summary = summarize(core, now, STARTING_CASH);
@@ -110,8 +101,6 @@ export const useDesk = create<DeskState>((set, get) => ({
   now: 0,
   source: "connecting",
   workerAlive: false,
-  workerVersion: null,
-  health: null,
   heartbeatAgeMs: null,
   commandNote: null,
   liveStatus: "idle",
@@ -143,39 +132,21 @@ export const useDesk = create<DeskState>((set, get) => ({
 
   syncServer: async () => {
     try {
-      const view = await getDesk({ data: { since: lastRev } });
-      if (view.now) clockSkew = view.now - Date.now();
-      if (view.unchanged) {
-        // the worker has not saved since the last poll: refresh only what changes between saves
-        set({
-          source: view.alive ? "server" : "server-offline",
-          workerAlive: view.alive,
-          workerVersion: view.workerVersion ?? null,
-          health: view.health ?? null,
-          heartbeatAgeMs: view.heartbeatAgeMs,
-          commandNote: view.lastCommandNote,
-          now: view.now,
-          liveFetchedAt: view.tapeAt,
-          bookStatus: view.quotesAt && view.now - view.quotesAt < 10_000 ? "live" : view.alive ? "connecting" : "down",
-        });
-        return;
-      }
-      lastRev = view.rev;
+      const view = await getDesk();
       if (view.core) {
         const alive = view.alive;
         // keep a just-changed setting on screen until the worker has applied it
-        const hold = pending && Date.now() - pending.at < HOLD_MS ? pending : null;
+        const hold = pending && Date.now() - pending.at < 6000 ? pending : null;
         if (pending && !hold) pending = null;
         if (hold?.risk && Object.entries(hold.risk).every(([k, v]) => (view.core!.risk as unknown as Record<string, unknown>)[k] === v)) pending = null;
         set({
           ...view.core,
           ...(hold?.risk ? { risk: { ...view.core.risk, ...hold.risk } } : {}),
           ...(hold?.mode ? { mode: hold.mode } : {}),
+          ...(hold?.gateBasis ? { gateBasis: hold.gateBasis } : {}),
           ...(hold?.killed != null ? { killed: hold.killed } : {}),
           source: alive ? "server" : "server-offline",
           workerAlive: alive,
-          workerVersion: view.workerVersion ?? null,
-          health: view.health ?? null,
           heartbeatAgeMs: view.heartbeatAgeMs,
           commandNote: view.lastCommandNote,
           trial: view.trial,
@@ -194,12 +165,6 @@ export const useDesk = create<DeskState>((set, get) => ({
     } catch {
       if (get().source === "connecting") set({ source: "local" });
     }
-  },
-
-  tickClock: () => {
-    const s = get();
-    if (!s.booted || s.source === "local" || s.source === "connecting") return;
-    set({ now: Date.now() + clockSkew });
   },
 
   tick: () => {
@@ -266,6 +231,9 @@ export const useDesk = create<DeskState>((set, get) => ({
     } else if (cmd.type === "setMode") {
       pending = { ...pending, mode: cmd.mode, at: Date.now() };
       set({ mode: cmd.mode });
+    } else if (cmd.type === "setGateBasis") {
+      pending = { ...pending, gateBasis: cmd.basis, at: Date.now() };
+      set({ gateBasis: cmd.basis });
     } else if (cmd.type === "setKilled") {
       pending = { ...pending, killed: cmd.on, at: Date.now() };
       set({ killed: cmd.on });
@@ -285,6 +253,7 @@ export const useDesk = create<DeskState>((set, get) => ({
   approve: (signalId) => void get().dispatch({ type: "approve", signalId }),
   reject: (signalId) => void get().dispatch({ type: "reject", signalId }),
   setMode: (mode) => void get().dispatch({ type: "setMode", mode }),
+  setGateBasis: (basis) => void get().dispatch({ type: "setGateBasis", basis }),
   setKilled: (on) => void get().dispatch({ type: "setKilled", on }),
   updateRisk: (risk) => void get().dispatch({ type: "updateRisk", risk }),
   flatten: (positionId) => void get().dispatch({ type: "flatten", positionId }),

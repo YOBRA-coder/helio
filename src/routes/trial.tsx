@@ -4,7 +4,8 @@ import { CalibrationChart, EquityDrawdownChart, PnlCurve } from "@/components/ch
 import { Button, Panel, Pill, Stat } from "@/components/widgets";
 import { clock, money, pct, signedMoney } from "@/lib/trading/format";
 import { useDesk } from "@/lib/trading/store";
-import type { Bucket } from "@/lib/trading/trial";
+import { BASIS_LABEL, type Bucket } from "@/lib/trading/trial";
+import type { BrierBasis } from "@/lib/trading/types";
 
 export const Route = createFileRoute("/trial")({
   head: () => ({ meta: [{ title: "Trial · Helios Desk" }] }),
@@ -21,6 +22,8 @@ function TrialPage() {
   const [confirm, setConfirm] = useState(false);
   const sum = trial?.summary;
   const blend = useDesk((s) => s.blend);
+  const gateBasis = useDesk((s) => s.gateBasis);
+  const setGateBasis = useDesk((s) => s.setGateBasis);
 
   return (
     <div className="space-y-4">
@@ -85,27 +88,45 @@ function TrialPage() {
 
       {sum && sum.brierModel != null && (
         <Panel title="Calibration (Brier score, lower is better)">
-          <div className="grid gap-3 font-mono text-sm tabular-nums sm:grid-cols-4">
-            <div>
-              <p className="text-xs text-muted">Model</p>
-              <p>{sum.brierModel.toFixed(4)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted">Model + context</p>
-              <p>{sum.brierCtx?.toFixed(4) ?? "—"}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted">Shadow: momentum</p>
-              <p>{sum.brierAlt?.toFixed(4) ?? "needs 10+"}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted">Market price</p>
-              <p>{sum.brierMarket?.toFixed(4) ?? "—"}</p>
-            </div>
+          <p className="mb-2 text-xs uppercase tracking-wide text-muted">What the live gate scores against the market</p>
+          <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Brier gate yardstick">
+            {(["model", "ctx", "alt"] as BrierBasis[]).map((b) => (
+              <Button key={b} type="button" variant={gateBasis === b ? "primary" : "quiet"} aria-pressed={gateBasis === b} onClick={() => gateBasis !== b && setGateBasis(b)}>
+                {BASIS_LABEL[b]}
+              </Button>
+            ))}
           </div>
+          <div className="grid gap-3 font-mono text-sm tabular-nums sm:grid-cols-4">
+            {(
+              [
+                ["model", "Model", sum.brierModel.toFixed(4)],
+                ["ctx", "Model + context", sum.brierCtx?.toFixed(4) ?? "—"],
+                ["alt", "Shadow: momentum", sum.brierAlt?.toFixed(4) ?? "needs 10+"],
+                [null, "Market price", sum.brierMarket?.toFixed(4) ?? "—"],
+              ] as Array<[BrierBasis | null, string, string]>
+            ).map(([id, label, value]) => (
+              <div key={label} className={id === sum.brierBasis ? "rounded-md border border-primary px-2 py-1" : "px-2 py-1"}>
+                <p className="text-xs text-muted">{label}{id === sum.brierBasis ? " · gate" : ""}</p>
+                <p>{value}</p>
+              </div>
+            ))}
+          </div>
+          {sum.brierEdge != null && (
+            <p className="mt-3 text-sm">
+              {BASIS_LABEL[sum.brierBasis]} {sum.brierEdge > 0 ? "beats" : "does not beat"} the market by{" "}
+              <span className="font-mono tabular-nums">{Math.abs(sum.brierEdge).toFixed(4)}</span> on the same {sum.brierBasis === "alt" ? "scored" : "official"} trades
+              {sum.brierEdgeZ != null ? (
+                sum.brierEdgeZ >= 1.64 ? ", and that gap is unlikely to be luck." : sum.brierEdge > 0 ? `, but that gap is still within luck (z ${sum.brierEdgeZ.toFixed(1)}; ~1.6+ is convincing).` : "."
+              ) : "."}
+            </p>
+          )}
           <p className="mt-3 text-sm text-muted">
-            A coin flip scores 0.25. If the model does not beat the market column, its “edge” is noise and the gate stays
-            closed.
+            A coin flip scores 0.25. If the chosen column does not beat the market column, its “edge” is noise and the gate stays closed.
+          </p>
+          <p className="mt-2 text-xs text-muted">
+            Switching the yardstick re-scores every trade you already have instantly. Nothing is wiped, because each trade stored all three
+            probabilities when it was placed, so a reset is not needed. Every switch is written to the audit trail. Be wary of picking whichever
+            column happens to win: reset the trial when you change the model itself, not the yardstick.
           </p>
         </Panel>
       )}
@@ -136,6 +157,7 @@ function TrialPage() {
         <Breakdown title="By window" rows={sum?.byGroup ?? []} />
         <Breakdown title="By time to expiry at entry" rows={sum?.byTtx ?? []} />
       </div>
+      {(sum?.byMode.length ?? 0) > 0 && <Breakdown title="By how it was placed (Auto vs Manual mode)" rows={sum?.byMode ?? []} />}
 
       <Panel title="Context signals">
         <div className="mb-3 flex flex-wrap gap-2">
@@ -207,7 +229,7 @@ function Breakdown({ title, rows }: { title: string; rows: Bucket[] }) {
       <ul className="space-y-2 text-sm">
         {rows.map((b) => (
           <li key={b.key} className="flex items-center justify-between gap-3 font-mono tabular-nums">
-            <span className="w-24 font-sans">{b.key}</span>
+            <span className="min-w-0 flex-1 truncate font-sans">{b.key}</span>
             <span className="text-muted">{b.trades} trades</span>
             <span className="text-muted">{b.trades ? pct(b.wins / b.trades) : "—"}</span>
             <span className={b.pnl >= 0 ? "text-primary" : "text-danger"}>{signedMoney(b.pnl)}</span>

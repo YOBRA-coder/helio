@@ -1,6 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  Activity,
   Ban,
   Bell,
   Crosshair,
@@ -12,7 +11,6 @@ import {
   X,
   Radar,
   ScrollText,
-  Ticket,
   SlidersHorizontal,
   UserRound,
   Wallet,
@@ -32,8 +30,6 @@ const NAV = [
   { to: "/", label: "Desk", icon: LayoutDashboard },
   { to: "/markets", label: "Markets", icon: Radar },
   { to: "/signals", label: "Signals", icon: Crosshair },
-  { to: "/analysis", label: "Analysis", icon: Activity },
-  { to: "/bets", label: "Bets", icon: Ticket },
   { to: "/book", label: "Book", icon: Wallet },
   { to: "/trial", label: "Trial", icon: Gauge },
   { to: "/live", label: "Live", icon: Zap },

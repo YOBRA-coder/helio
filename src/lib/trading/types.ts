@@ -2,6 +2,8 @@ export type ThemeId = "orchard" | "glacier" | "gilt" | "ion" | "daybook";
 export type Side = "yes" | "no";
 export type MarketKind = "sim-window" | "live";
 export type Mode = "manual" | "auto";
+/** Which probability the "beats the market" Brier gate scores: base model, model + context, or the momentum shadow. */
+export type BrierBasis = "model" | "ctx" | "alt";
 export type CircuitKind = "daily" | "drawdown" | "reconcile" | null;
 
 export interface RiskConfig {
@@ -24,8 +26,6 @@ export interface RiskConfig {
   freshnessMs: number;
   cancelOnKill: boolean;
   uncertaintyHaircut: number;
-  /** how readily the closer strategy trades: selective (fewest, safest) · balanced · active (most trades) */
-  pace?: "selective" | "balanced" | "active";
 }
 
 export interface Market {
@@ -143,6 +143,8 @@ export interface Position {
   group: string;
   edgeAtEntry: number;
   modelVersion: string;
+  /** How the entry order was placed (auto, or approved by hand). Older saves lack it. */
+  mode?: Mode;
 }
 
 export interface AuditEntry {
@@ -241,6 +243,8 @@ export interface ScoreRow {
   yesWon: boolean | null;
   edgeAtEntry: number;
   official: boolean;
+  /** auto = the desk placed it; manual = you approved it. Older rows lack it. */
+  mode?: Mode;
 }
 
 export interface ContextItem {
@@ -318,6 +322,8 @@ export interface DeskCore {
   /** learned trust in the model versus the market price */
   blend: BlendState;
   mode: Mode;
+  /** which probability the Brier gate scores (changing it re-scores history; nothing is wiped) */
+  gateBasis: BrierBasis;
   killed: boolean;
   cash: number;
   simMarkets: Market[];
@@ -347,20 +353,8 @@ export interface DeskCore {
   live: LiveBook;
 }
 
-/** Safety facts from the live BTC feed that the closer strategy uses to refuse shaky entries. */
-export interface FeedGuard {
-  /** BTC price about 15 seconds ago from the feed's own recording; null when it has none */
-  p15: number | null;
-  /** how far apart the voting exchanges are right now, in basis points; null with fewer than two */
-  spreadBp: number | null;
-  /** exchanges currently voting */
-  venues: number;
-}
-
 export interface TickCtx {
   now: number;
-  /** live-feed safety facts for this tick (null/absent on the REST fallback) */
-  feed?: FeedGuard | null;
   spot: number | null;
   spotSource?: string;
   /** true when `spot` is a new print since the last tick (keeps the vol sample honest). */
@@ -379,6 +373,7 @@ export type DeskCommand =
   | { type: "approve"; signalId: string }
   | { type: "reject"; signalId: string }
   | { type: "setMode"; mode: Mode }
+  | { type: "setGateBasis"; basis: BrierBasis }
   | { type: "setKilled"; on: boolean }
   | { type: "updateRisk"; risk: Partial<RiskConfig> }
   | { type: "flatten"; positionId: string }

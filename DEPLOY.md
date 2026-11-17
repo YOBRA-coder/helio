@@ -90,7 +90,7 @@ sudo ufw allow OpenSSH && sudo ufw allow 80 && sudo ufw allow 443 && sudo ufw en
 
 ## Health checks
 - Worker alive: the top bar of the app shows the worker status; it turns stale if the heartbeat is older than 20 seconds.
-- Phone alerts: set an ntfy URL on the Account page. You get a message when trades settle and a daily summary. A silent day can mean the worker died, so also check the app.
+- Phone alerts: set an ntfy URL on the Account page. You get a message the moment a trade is placed (or needs approval in Manual mode), when trades settle, and a daily summary. Messages sent close together are joined, not dropped. Controls > Trade notifications adds on-device notifications while the app is open. A silent day can mean the worker died, so also check the app.
 
 ## No persistent disk? Use Neon (free Postgres)
 Helios keeps its data as files. On a host without a disk those files vanish on every restart (you get signed out and your account disappears).
@@ -140,17 +140,3 @@ The account is signed out everywhere. Saved keys and the desk are untouched. Onc
 
 ## Limits: what stops trades
 Controls shows each limit's live usage and what blocks a signal. The two that most often cause "trades, then a pause": orders per hour (a rolling 60 minutes) and open exposure. Small bets leave room for many more concurrent trades under the same exposure. Presets: Small bets (more trades), Balanced (default), Big bets (fewer trades). Existing accounts keep their saved limits until you pick a preset.
-
-## Speed and feed notes (upgrade)
-
-- Caddy now compresses responses and caches `/assets/*` as immutable; nitro precompresses public assets. Rebuild and `caddy reload` after pulling.
-- The worker needs Node 22+ (websockets). It connects to Coinbase, Binance and Kraken at once, averages them after removing the USDT premium and drops any venue that is more than 15bp off the rest. Control with `HELIOS_FEED_VENUES`.
-- Polymarket bids/asks stream from the public order-book websocket (`HELIOS_BOOK_WS=0` falls back to REST).
-- If your VPS region blocks Binance, the worker automatically uses the other venues; check the heartbeat log for per-venue status.
-- Pages poll every 2s while visible and 10s when the tab is hidden; unchanged snapshots return a tiny response.
-
-## After every update: restart BOTH processes
-
-The web app and the worker are separate. The worker is what trades and records prices, so after `git pull`/unzip run `npm install && npm run build`, then restart the web service **and** the worker (`systemctl restart helio-web helio-worker`, or your own unit names). The Analysis and Signals pages show a "Feed health" card that says "Old worker" if the worker is still on an old build.
-
-Trading pace (Limits page): Selective / Balanced (default) / Active. Balanced acts from 0.75 sd in the last half of a window; Selective is the original strict behaviour.

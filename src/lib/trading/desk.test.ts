@@ -478,10 +478,9 @@ test("a window noticed mid-way never takes the current price as its open", () =>
 });
 
 test("model far from the market (25+ points) is blocked as a data problem", () => {
-  // late in the window with BTC well clear of the open, but a market that prices the move at 20%: a data problem
-  let s = applyTape(makeCore(T0), tape(T0, 0.2, 100_000), { "poly-m1": 100_000 }, T0);
+  let s = applyTape(makeCore(T0), tape(T0, 0.2), { "poly-m1": 100_000 }, T0);
   s = { ...s, mode: "auto", risk: { ...s.risk, minEdge: 0 } };
-  for (let i = 1; i <= 40; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_300, spotFresh: true, spotDtMs: 1000, sim: false });
+  for (let i = 1; i <= 40; i += 1) s = tickCore(s, { now: T0 + i * 1000, spot: 100_000, spotFresh: true, spotDtMs: 1000, sim: false });
   assert.ok(!s.signals.some((x) => x.kind === "live" && x.status === "executed"));
   assert.ok(s.signals.some((x) => /disagree by over 25 points/.test(x.rejectedReason ?? "")));
 });
@@ -526,4 +525,91 @@ test("real markets: longshot band, believable-edge cap and loss-streak cool-off"
   const o = evaluateOpportunity({ ...m, updatedAt: T0 + 200_000, endAt: T0 + 900_000, startAt: T0 - 400_000 }, 100_000, T0 + 200_000, DEFAULT_RISK, 10_000, 0, 0, false, null, { blendW: 0.5, coolOff: "Cooling off for an hour after 4 losing trades in a row" });
   assert.ok(o.hardFail);
   assert.ok(/Cooling off|band|disagree/.test(o.hardFail ?? ""));
+});
+
+test("gate yardstick: choosing model + context re-scores history without wiping it", () => {
+  // base model is worse than the market, the context-adjusted one is better, on the same trades
+  const rows = Array.from({ length: 40 }, (_, i) => ({ ...row(i, 1, i % 2 === 0), pYesBase: 0.7, pYesCtx: 0.52, marketMid: 0.5 }));
+  const base = summarize({ scores: rows, trialStartedAt: T0 }, T0 + 86_400_000, 10_000);
+  assert.ok((base.brierEdge ?? 0) < 0);
+  const ctx = summarize({ scores: rows, gateBasis: "ctx", trialStartedAt: T0 }, T0 + 86_400_000, 10_000);
+  assert.equal(ctx.brierBasis, "ctx");
+  assert.ok((ctx.brierEdge ?? 0) < 0.01 && ctx.brierChosen != null);
+  assert.equal(ctx.trades, base.trades);
+  const ctxMkt = summarize({ scores: rows.map((r) => ({ ...r, pYesCtx: 0.4 })), gateBasis: "ctx", trialStartedAt: T0 }, T0 + 1, 10_000);
+  const brier = evaluateGate(ctxMkt, 600).checks.find((c) => c.id === "brier")!;
+  assert.match(brier.label, /Model \+ context/);
+
+  let s = makeCore(T0);
+  s = applyCommand(s, { type: "setGateBasis", basis: "ctx" }, T0 + 1);
+  assert.equal(s.gateBasis, "ctx");
+  assert.match(s.audit[0].action, /yardstick/);
+  s = { ...s, scores: [{ id: "a" } as ScoreRow] };
+  s = applyCommand(s, { type: "resetTrial" }, T0 + 5);
+  assert.equal(s.gateBasis, "ctx"); // reset keeps the chosen yardstick
+  s = applyCommand(s, { type: "setGateBasis", basis: "bogus" as never }, T0 + 6);
+  assert.equal(s.gateBasis, "model");
+});
+
+test("momentum yardstick needs 10+ scored windows", () => {
+  const rows = Array.from({ length: 5 }, (_, i) => ({ ...row(i, 1, true), pYesAlt: 0.7 }));
+  const sum = summarize({ scores: rows, gateBasis: "alt", trialStartedAt: T0 }, T0 + 1, 10_000);
+  assert.equal(sum.brierEdge, null);
+  assert.equal(evaluateGate(sum, 600).checks.find((c) => c.id === "brier")!.pass, false);
+});
+
+test("runner notifies when an order is placed, once, and not for history after a restart", async () => {
+  const sent: string[] = [];
+  let now = T0;
+  const base = {
+    now: () => now,
+    loadTape: async () => tape(now),
+    fetchQuotes: async () => [],
+    fetchResolutions: async () => ({}),
+    fetchSpotAt: async () => 100_000,
+    liveSpot: () => ({ price: 100_000, at: now }),
+    loadContext: async () => ({ fetchedAt: now, fearGreed: null, tilt: 0, stakeScale: 1, blockReason: null, items: [], crowd: [], worldMonitor: { status: "off" as const, detail: "", at: now } }),
+    getSdk: async () => { throw new Error("no sdk"); },
+    liveEnv: () => ({ enabled: false, hasKey: false, hasFunder: false, hasOwnerToken: true }),
+    persist: async () => {},
+    journal: async () => {},
+    drainCommands: async () => [],
+    notify: (t: string) => void sent.push(t),
+  };
+  const r = new DeskRunner(base);
+  r.core = { ...r.core, mode: "auto" };
+  await r.step(); // primes: nothing announced
+  assert.equal(sent.length, 0);
+  const fake = { id: "ord-x", idempotencyKey: "k", marketId: "poly-m1", signalId: "s", mode: "auto" as const, venue: "paper" as const, side: "yes" as const, limitPrice: 0.45, quantity: 11.1, debit: 5, status: "open" as const, submittedAt: now, updatedAt: now, question: "Bitcoin Up or Down - test", kind: "live" as const };
+  r.core = { ...r.core, orders: [fake, ...r.core.orders] };
+  now += 1000;
+  await r.step();
+  assert.equal(sent.filter((t) => /trade placed/i.test(t)).length, 1);
+  assert.match(sent.join(" "), /Auto/);
+  now += 1000;
+  await r.step();
+  assert.equal(sent.filter((t) => /trade placed/i.test(t)).length, 1); // not repeated
+  const restarted = new DeskRunner(base, r.core);
+  const before = sent.length;
+  now += 1000;
+  await restarted.step();
+  assert.equal(sent.length, before);
+});
+
+test("webhook bursts are joined, not dropped", async () => {
+  const { sendWebhook } = await import("./hub.ts");
+  const calls: string[] = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async (_u: unknown, init?: { body?: string }) => { calls.push(String(init?.body)); return new Response("ok"); }) as typeof fetch;
+  try {
+    const gate: { at: number; buf?: string[]; timer?: ReturnType<typeof setTimeout> } = { at: 0 };
+    await sendWebhook("https://ntfy.sh/x", "one", gate, 100_000);
+    await sendWebhook("https://ntfy.sh/x", "two", gate, 100_100);
+    await sendWebhook("https://ntfy.sh/x", "three", gate, 100_200);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(gate.buf, ["two", "three"]);
+    if (gate.timer) clearTimeout(gate.timer);
+  } finally {
+    globalThis.fetch = orig;
+  }
 });

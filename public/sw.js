@@ -43,3 +43,20 @@ self.addEventListener("fetch", (event) => {
   }
   // everything else (server functions, data) goes straight to the network
 });
+
+// Tapping a trade notification opens (or focuses) the app.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ("focus" in c) {
+          if ("navigate" in c) c.navigate(target).catch(() => {});
+          return c.focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    }),
+  );
+});

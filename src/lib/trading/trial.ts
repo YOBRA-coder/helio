@@ -5,7 +5,9 @@
  * priced with a deliberate bias so the UI has something to rehearse on; they must never
  * count towards a track record.
  */
-import type { DeskCore, ScoreRow } from "./types.ts";
+import type { BrierBasis, DeskCore, ScoreRow } from "./types.ts";
+
+export const BASIS_LABEL: Record<BrierBasis, string> = { model: "Model", ctx: "Model + context", alt: "Shadow: momentum" };
 
 export interface Bucket {
   key: string;
@@ -34,8 +36,16 @@ export interface TrialSummary {
   brierCtx: number | null;
   brierAlt: number | null;
   brierMarket: number | null;
-  /** Positive when the model's probabilities beat the market mid on the same trades. */
+  /** Which probability the gate scores. */
+  brierBasis: BrierBasis;
+  /** Brier of the chosen basis, and of the market on exactly the same trades (null until enough data). */
+  brierChosen: number | null;
+  brierChosenMarket: number | null;
+  /** Positive when the chosen probabilities beat the market mid on the same trades. */
   brierEdge: number | null;
+  /** brierEdge divided by its standard error. Under ~1.3 the gap is indistinguishable from luck. */
+  brierEdgeZ: number | null;
+  byMode: Bucket[];
   byGroup: Bucket[];
   byTtx: Bucket[];
   bySide: Bucket[];
@@ -88,18 +98,20 @@ function ttxLabel(min: number) {
   return "> 4 h";
 }
 
-function calibrate(rows: ScoreRow[]) {
+function calibrate(rows: ScoreRow[], pick: (r: ScoreRow) => number = (r) => r.pYesBase) {
   const buckets = Array.from({ length: 10 }, (_, i) => ({ sum: 0, won: 0, n: 0, i }));
   for (const r of rows) {
-    const b = buckets[Math.min(9, Math.floor(r.pYesBase * 10))];
+    const p = pick(r);
+    const b = buckets[Math.min(9, Math.max(0, Math.floor(p * 10)))];
     b.n += 1;
-    b.sum += r.pYesBase;
+    b.sum += p;
     b.won += r.yesWon ? 1 : 0;
   }
   return buckets.map((b) => ({ p: b.n ? b.sum / b.n : (b.i + 0.5) / 10, won: b.n ? b.won / b.n : 0, n: b.n }));
 }
 
-export function summarize(core: Pick<DeskCore, "scores" | "trialStartedAt">, now: number, startingEquity: number): TrialSummary {
+export function summarize(core: Pick<DeskCore, "scores" | "trialStartedAt"> & { gateBasis?: BrierBasis }, now: number, startingEquity: number): TrialSummary {
+  const basis: BrierBasis = core.gateBasis === "ctx" || core.gateBasis === "alt" ? core.gateBasis : "model";
   const all = core.scores;
   const real = all.filter((r) => r.kind === "live").sort((a, b) => a.settledAt - b.settledAt);
   const sim = all.filter((r) => r.kind === "sim-window");
@@ -130,6 +142,26 @@ export function summarize(core: Pick<DeskCore, "scores" | "trialStartedAt">, now
   const brierAlt = altRows.length >= 10 ? altRows.reduce((a, r) => a + ((r.pYesAlt as number) - (r.yesWon ? 1 : 0)) ** 2, 0) / altRows.length : null;
   const brierMarket = brier((r) => r.marketMid);
 
+  // The gate yardstick: chosen probability vs the market, on exactly the same trades (paired).
+  const pickP = (r: ScoreRow) => (basis === "ctx" ? r.pYesCtx : basis === "alt" ? (r.pYesAlt as number) : r.pYesBase);
+  const rowsB = basis === "alt" ? altRows : official;
+  const sq = (p: number, r: ScoreRow) => (p - (r.yesWon ? 1 : 0)) ** 2;
+  let brierChosen: number | null = null;
+  let brierChosenMarket: number | null = null;
+  let brierEdge: number | null = null;
+  let brierEdgeZ: number | null = null;
+  if (rowsB.length >= (basis === "alt" ? 10 : 1)) {
+    const d = rowsB.map((r) => sq(r.marketMid, r) - sq(pickP(r), r)); // positive = chosen beats market
+    const m = d.reduce((a, x) => a + x, 0) / d.length;
+    brierChosen = rowsB.reduce((a, r) => a + sq(pickP(r), r), 0) / rowsB.length;
+    brierChosenMarket = rowsB.reduce((a, r) => a + sq(r.marketMid, r), 0) / rowsB.length;
+    brierEdge = m;
+    if (d.length > 2) {
+      const v = d.reduce((a, x) => a + (x - m) ** 2, 0) / (d.length - 1);
+      brierEdgeZ = v > 0 ? m / Math.sqrt(v / d.length) : null;
+    }
+  }
+
   return {
     days: Math.max(0, (now - core.trialStartedAt) / 86_400_000),
     trades: n,
@@ -149,7 +181,12 @@ export function summarize(core: Pick<DeskCore, "scores" | "trialStartedAt">, now
     brierCtx,
     brierAlt,
     brierMarket,
-    brierEdge: brierModel != null && brierMarket != null ? brierMarket - brierModel : null,
+    brierBasis: basis,
+    brierChosen,
+    brierChosenMarket,
+    brierEdge,
+    brierEdgeZ,
+    byMode: bucketOf(real, (r) => (r.mode === "auto" ? "Auto (desk placed)" : r.mode === "manual" ? "Manual (you approved)" : "Before mode was recorded")),
     byGroup: bucketOf(real, (r) => r.group),
     byTtx: bucketOf(real, (r) => ttxLabel(r.minutesToExpiry)),
     bySide: bucketOf(real, (r) => (r.side === "yes" ? "Bet Up / Yes" : "Bet Down / No")),
@@ -159,7 +196,7 @@ export function summarize(core: Pick<DeskCore, "scores" | "trialStartedAt">, now
       return { trades: rows.length, wins: rows.filter((r) => r.pnl > 0).length, pnl: rows.reduce((a, r) => a + r.pnl, 0) };
     })(),
     pnls: real.map((r) => r.pnl),
-    calibration: calibrate(official),
+    calibration: calibrate(rowsB, pickP),
     sim: { trades: sim.length, netPnl: sim.reduce((a, r) => a + r.pnl, 0) },
   };
 }
@@ -170,6 +207,15 @@ export function evaluateGate(
   cfg: GateConfig = DEFAULT_GATE,
 ): { checks: GateCheck[]; eligible: boolean } {
   const pf = Number.isFinite(summary.profitFactor) ? summary.profitFactor.toFixed(2) : "∞";
+  const z = summary.brierEdgeZ;
+  const label = BASIS_LABEL[summary.brierBasis];
+  const brierDetail =
+    summary.brierChosen != null && summary.brierChosenMarket != null
+      ? `${label.toLowerCase()} ${summary.brierChosen.toFixed(4)} vs market ${summary.brierChosenMarket.toFixed(4)} (lower is better)` +
+        (z != null ? ` · ${z >= 1.64 ? "clearly" : z > 0 ? "not clearly" : "not"} better than luck (z ${z.toFixed(1)})` : "")
+      : summary.brierBasis === "alt"
+        ? "momentum shadow needs 10+ scored windows"
+        : "no official settlements yet";
   const checks: GateCheck[] = [
     {
       id: "days",
@@ -197,12 +243,9 @@ export function evaluateGate(
     },
     {
       id: "brier",
-      label: "Model probabilities beat the market price (Brier score)",
+      label: `${label} probabilities beat the market price (Brier score)`,
       pass: summary.brierEdge != null && summary.brierEdge > 0,
-      detail:
-        summary.brierModel != null && summary.brierMarket != null
-          ? `model ${summary.brierModel.toFixed(4)} vs market ${summary.brierMarket.toFixed(4)} (lower is better)`
-          : "no official settlements yet",
+      detail: brierDetail,
     },
     {
       id: "dd",

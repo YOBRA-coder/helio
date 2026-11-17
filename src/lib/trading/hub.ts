@@ -6,8 +6,7 @@ import { join } from "node:path";
 import { AccountStore, type UserSecrets } from "../accounts/store.ts";
 import { appendJournal, backupSnapshot, drainCommands, readSnapshot, takeRestore, writeSnapshot } from "./desk-io.ts";
 import { loadContext } from "./context.ts";
-import { MultiFeed, venuesFromEnv, type PriceFeed } from "./feed.ts";
-import { BookFeed } from "./book-feed.ts";
+import { SpotFeed } from "./feed.ts";
 import { loadSdk } from "./live.ts";
 import { DeskRunner, WORKER_VERSION } from "./runner.ts";
 import { fetchQuotes, fetchResolutions, fetchSpotAt, loadTape } from "./tape-fetch.ts";
@@ -28,13 +27,36 @@ export function cached<A extends unknown[], R>(ttlMs: number, fn: (...a: A) => P
   };
 }
 
-export async function sendWebhook(url: string | undefined, text: string, last: { at: number }, now = Date.now()) {
-  if (!url || !/^https:\/\//.test(url) || now - last.at < 10_000) return;
+export interface WebhookGate {
+  at: number;
+  buf?: string[];
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * Posts to the user's phone-alert URL. Messages inside the 10s spacing are joined and sent together
+ * instead of being dropped, so a burst of orders or settlements never silently loses an alert.
+ */
+export async function sendWebhook(url: string | undefined, text: string, last: WebhookGate, now = Date.now()) {
+  if (!url || !/^https:\/\//.test(url)) return;
+  if (now - last.at < 10_000) {
+    last.buf = [...(last.buf ?? []), text].slice(-20);
+    if (!last.timer) {
+      last.timer = setTimeout(() => {
+        last.timer = undefined;
+        const body = (last.buf ?? []).join("\n");
+        last.buf = [];
+        if (body) void sendWebhook(url, body, last, Date.now());
+      }, Math.max(500, 10_050 - (now - last.at)));
+      last.timer.unref?.();
+    }
+    return;
+  }
   last.at = now;
   try {
     if (/^https:\/\/([a-z0-9-]+\.)*ntfy\.sh\//i.test(url)) {
       // ntfy takes the message as a plain-text body and pushes it to the phone app
-      await fetch(url, { method: "POST", headers: { title: "Helios" }, body: text.slice(0, 1800), signal: AbortSignal.timeout(5000) });
+      await fetch(url, { method: "POST", headers: { title: "Helios", priority: "high", tags: "chart_with_upwards_trend" }, body: text.slice(0, 1800), signal: AbortSignal.timeout(5000) });
       return;
     }
     await fetch(url, {
@@ -63,17 +85,14 @@ export class Hub {
   private store: AccountStore;
   private env: Record<string, string | undefined>;
   private shared;
-  /** live BTC sockets (Coinbase, Binance, Kraken) shared by every desk; optional (HELIOS_WS_FEED=0 turns it off) */
-  readonly feed: PriceFeed | null;
-  /** Polymarket order-book websocket shared by every desk; the REST poll is the fallback (HELIOS_BOOK_WS=0 turns it off) */
-  readonly book: BookFeed | null;
+  /** one live BTC websocket shared by every desk; optional (HELIOS_WS_FEED=0 turns it off) */
+  readonly feed: SpotFeed | null;
 
   constructor(store: AccountStore, env: Record<string, string | undefined> = process.env, now: () => number = Date.now) {
     this.store = store;
     this.env = env;
     this.now = now;
-    this.feed = env.HELIOS_WS_FEED === "0" ? null : new MultiFeed({ now, freshMs: 6_000, venues: venuesFromEnv(env.HELIOS_FEED_VENUES) });
-    this.book = env.HELIOS_BOOK_WS === "0" ? null : new BookFeed({ now });
+    this.feed = env.HELIOS_WS_FEED === "0" ? null : new SpotFeed({ now });
     this.shared = {
       loadTape: cached(5_500, loadTape, now),
       fetchQuotes: cached(2_000, fetchQuotes, now, (ids: string[]) => [...ids].sort().join(",")),
@@ -115,7 +134,7 @@ export class Hub {
     const secrets = await this.store.loadSecrets(id);
     const prior = await readSnapshot(dir);
     const tenant: Tenant = { id, runner: null as unknown as DeskRunner, secrets, secretsMtime: await this.mtime(dir), writes: 0 };
-    const webhookGate = { at: 0 };
+    const webhookGate: WebhookGate = { at: 0 };
     const t = () => tenant.secrets;
     tenant.runner = new DeskRunner(
       {
@@ -125,15 +144,6 @@ export class Hub {
         fetchResolutions: this.shared.fetchResolutions,
         fetchSpotAt: this.shared.fetchSpotAt,
         liveSpot: () => this.feed?.latest() ?? null,
-        spotAt: this.feed?.at ? (ts: number) => this.feed?.at?.(ts) ?? null : undefined,
-        feedGuard: this.feed
-          ? (now: number) => {
-              const f = this.feed as PriceFeed;
-              return { p15: f.at?.(now - 15_000) ?? null, spreadBp: f.spreadBp?.() ?? null, venues: f.status().venues?.filter((v) => v.used).length ?? 1 };
-            }
-          : undefined,
-        watchBook: this.book ? (ids: string[]) => this.watchBook(id, ids) : undefined,
-        bookQuotes: this.book ? (ids: string[]) => (this.book?.healthy() ? this.book.quotes(ids) : null) : undefined,
         loadContext: () => this.context(t()),
         getSdk: () => loadSdk(Hub.sdkEnv(this.env, t())),
         liveEnv: () => ({
@@ -157,10 +167,6 @@ export class Hub {
             feedError: meta.feedError,
             liveEnv: e,
             lastCommandNote: meta.lastCommandNote,
-            health: {
-              venues: (this.feed?.status().venues ?? []).map((v) => ({ name: v.name, state: v.state, used: v.used, ageMs: v.lastTickAt ? this.now() - v.lastTickAt : null })),
-              book: this.book ? (({ state, tokens, quotes }) => ({ state, tokens, quotes }))(this.book.status()) : null,
-            },
           });
         },
         journal: (rows) => appendJournal(dir, rows),
@@ -174,21 +180,6 @@ export class Hub {
     return tenant;
   }
 
-  /** each desk reports the tokens it follows; the one book socket follows the union */
-  private wanted = new Map<string, string[]>();
-  private watchBook(tenantId: string, ids: string[]) {
-    this.wanted.set(tenantId, ids);
-  }
-  private lastAssets = "";
-  private syncBookAssets() {
-    if (!this.book) return;
-    const all = [...new Set([...this.wanted.values()].flat())].sort();
-    const key = all.join(",");
-    if (key === this.lastAssets) return;
-    this.lastAssets = key;
-    this.book.setAssets(all);
-  }
-
   private async mtime(dir: string) {
     try {
       return (await stat(join(dir, "secrets.enc"))).mtimeMs;
@@ -200,8 +191,6 @@ export class Hub {
   async step() {
     const now = this.now();
     this.feed?.start(); // idempotent
-    this.book?.start();
-    this.syncBookAssets();
     if (now - this.lastScan > 5_000) {
       this.lastScan = now;
       const ids = await this.store.listUserIds();
@@ -217,11 +206,7 @@ export class Hub {
           cur.secretsMtime = m;
         }
       }
-      for (const id of [...this.tenants.keys()]) {
-        if (ids.includes(id)) continue;
-        this.tenants.delete(id);
-        this.wanted.delete(id);
-      }
+      for (const id of [...this.tenants.keys()]) if (!ids.includes(id)) this.tenants.delete(id);
     }
     await Promise.all(
       [...this.tenants.values()].map((t) =>
@@ -233,7 +218,6 @@ export class Hub {
   /** Final snapshot with heartbeat 0 so the UI shows "offline" immediately. */
   async shutdown() {
     this.feed?.stop();
-    this.book?.stop();
     for (const t of this.tenants.values()) {
       const dir = this.store.userDir(t.id);
       await writeSnapshot(dir, {

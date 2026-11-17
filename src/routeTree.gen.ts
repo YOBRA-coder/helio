@@ -12,8 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as AuditRouteImport } from './routes/audit'
-import { Route as AnalysisRouteImport } from './routes/analysis'
-import { Route as BetsRouteImport } from './routes/bets'
 import { Route as BookRouteImport } from './routes/book'
 import { Route as ControlsRouteImport } from './routes/controls'
 import { Route as LabRouteImport } from './routes/lab'
@@ -36,16 +34,6 @@ const AccountRoute = AccountRouteImport.update({
 const AuditRoute = AuditRouteImport.update({
   id: '/audit',
   path: '/audit',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AnalysisRoute = AnalysisRouteImport.update({
-  id: '/analysis',
-  path: '/analysis',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BetsRoute = BetsRouteImport.update({
-  id: '/bets',
-  path: '/bets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BookRoute = BookRouteImport.update({
@@ -93,8 +81,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/audit': typeof AuditRoute
-  '/analysis': typeof AnalysisRoute
-  '/bets': typeof BetsRoute
   '/book': typeof BookRoute
   '/controls': typeof ControlsRoute
   '/lab': typeof LabRoute
@@ -108,8 +94,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/audit': typeof AuditRoute
-  '/analysis': typeof AnalysisRoute
-  '/bets': typeof BetsRoute
   '/book': typeof BookRoute
   '/controls': typeof ControlsRoute
   '/lab': typeof LabRoute
@@ -124,8 +108,6 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/audit': typeof AuditRoute
-  '/analysis': typeof AnalysisRoute
-  '/bets': typeof BetsRoute
   '/book': typeof BookRoute
   '/controls': typeof ControlsRoute
   '/lab': typeof LabRoute
@@ -141,8 +123,6 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/audit'
-    | '/analysis'
-    | '/bets'
     | '/book'
     | '/controls'
     | '/lab'
@@ -156,8 +136,6 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/audit'
-    | '/analysis'
-    | '/bets'
     | '/book'
     | '/controls'
     | '/lab'
@@ -171,8 +149,6 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/audit'
-    | '/analysis'
-    | '/bets'
     | '/book'
     | '/controls'
     | '/lab'
@@ -187,8 +163,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
   AuditRoute: typeof AuditRoute
-  AnalysisRoute: typeof AnalysisRoute
-  BetsRoute: typeof BetsRoute
   BookRoute: typeof BookRoute
   ControlsRoute: typeof ControlsRoute
   LabRoute: typeof LabRoute
@@ -220,20 +194,6 @@ declare module '@tanstack/react-router' {
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AuditRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/analysis': {
-      id: '/analysis'
-      path: '/analysis'
-      fullPath: '/analysis'
-      preLoaderRoute: typeof AnalysisRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/bets': {
-      id: '/bets'
-      path: '/bets'
-      fullPath: '/bets'
-      preLoaderRoute: typeof BetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/book': {
@@ -299,8 +259,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
   AuditRoute: AuditRoute,
-  AnalysisRoute: AnalysisRoute,
-  BetsRoute: BetsRoute,
   BookRoute: BookRoute,
   ControlsRoute: ControlsRoute,
   LabRoute: LabRoute,
